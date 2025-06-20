@@ -1,0 +1,3 @@
+"""
+Blaze daemon package.
+"""

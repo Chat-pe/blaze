@@ -1,0 +1,17 @@
+#!/usr/bin/env python
+"""
+Command-line entry point for the Blaze daemon.
+"""
+
+import sys
+import os
+
+# Add the parent directory to sys.path to make imports work
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+# Import the CLI main function
+from src.daemon.daemon_cli import main
+
+if __name__ == "__main__":
+    main()

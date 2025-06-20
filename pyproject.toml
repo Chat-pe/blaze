@@ -1,0 +1,51 @@
+[tool.poetry]
+name = "blaze"
+version = "0.1.0"
+description = "A sequence and block execution framework"
+authors = ["Your Name <your.email@example.com>"]
+packages = [
+    { include = "src" }
+]
+
+[tool.poetry.scripts]
+blazed = "src.daemon.daemon_cli:main"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pydantic = "^2.5.0"
+croniter = "^2.0.0"
+python-dateutil = "^2.8.2"
+loguru = "^0.7.2"
+requests = "^2.32.4"
+tabulate = "^0.9.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+black = "^23.9.1"
+isort = "^5.12.0"
+mypy = "^1.5.1"
+ruff = "^0.0.292"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
