@@ -41,7 +41,7 @@ ELEMENTS = [
     "shadow", "shade", "darkness", "dusk", "twilight", "midnight", "eclipse",
 ]
 
-def generate_daemon_name() -> str:
+def generate_scheduler_name() -> str:
     """
     Generate a random 3-word hyphenated name for a daemon instance.
     

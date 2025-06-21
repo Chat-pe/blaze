@@ -1,22 +1,19 @@
 import functools
 import inspect 
 import time
-from typing import Callable, Optional, List, TypeVar, Dict, Any
+from typing import Callable, Optional, List, TypeVar, Dict, Any, Type
 from src.core._types import BlockData
-from src.core.registrar import BlazeRegistrar
+from pydantic import BaseModel
 
 T = TypeVar('T')
 class BlazeBlock:
     def __init__(self):
         self.blocks: Dict[str, BlockData] = {}
-        self.registrar = BlazeRegistrar()
     
     def _register_block(self, name: str, block_data: BlockData):
         if name in self.blocks:
             raise ValueError(f"Block {name} already registered")
-        self.blocks[name] = block_data
-        # Register with the registrar
-        self.registrar.register(name, block_data, 'block')
+        self.blocks[name] = block_data  
 
     def _get_block(self, name: str) -> BlockData:
         if name not in self.blocks:
@@ -36,7 +33,9 @@ class BlazeBlock:
             self,
             name: Optional[str] = None,
             description: Optional[str] = None,
-            tags: Optional[List[str]] = None
+            tags: Optional[List[str]] = None,
+            data_model: Optional[Type[BaseModel]] = None
+
     ) -> Callable[[Callable[...,T]], Callable[...,T]]:
         
         def decorator(func: Callable[...,T]) -> Callable[...,T]:
@@ -59,7 +58,8 @@ class BlazeBlock:
                 description=description,
                 tags=tags,
                 func=func,
-                signature=sig
+                signature=sig,
+                data_model=data_model
             )
 
             self._register_block(name, block_data)

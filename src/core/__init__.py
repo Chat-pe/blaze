@@ -5,39 +5,35 @@ Blaze core module exports
 # Export main classes
 from src.core.block import BlazeBlock
 from src.core.seq import BlazeSequence
-from src.core.scheduler_daemon import SchedulerDaemon
-
-# Export daemon manager functions for easy access
-from src.core.daemon_manager import (
-    get_scheduler,
-    is_scheduler_running,
-    shutdown_scheduler
-)
-
+from src.core.blaze import Blaze
+from src.core.logger import BlazeLogger
+from src.core.jobs import BlazeJobs
 # Export type definitions
 from src.core._types import (
     BlockData,
     SeqBlockData,
     SeqData,
     SequenceStatus,
-    SequenceResult
+    SequenceResult,
+    SequenceExecutionData,
+    SubmitSequenceData,
+    BlazeLock
 )
 
 __all__ = [
     # Main classes
     'BlazeBlock',
     'BlazeSequence',
-    'SchedulerDaemon',
-    
-    # Daemon manager
-    'get_scheduler',
-    'is_scheduler_running',
-    'shutdown_scheduler',
-    
+    'Blaze',
+    'BlazeLogger',
+    'BlazeJobs',
     # Type definitions
     'BlockData',
     'SeqBlockData',
     'SeqData',
     'SequenceStatus',
-    'SequenceResult'
+    'SequenceResult',
+    'SequenceExecutionData',
+    'SubmitSequenceData',
+    'BlazeLock'
 ]
