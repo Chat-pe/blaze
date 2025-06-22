@@ -38,7 +38,7 @@ class BlazeSequence:
             retry_delay: int = 0,
             auto_start: bool = False,
             fail_stop: bool = False
-    ):
+    )-> Callable:
         
         if seq_run_timeout is None:
             seq_run_timeout = 3600

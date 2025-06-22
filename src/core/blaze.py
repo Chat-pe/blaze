@@ -1,12 +1,15 @@
 from src.core.block import BlazeBlock
 from src.core.seq import BlazeSequence
 from src.core.namegen import generate_scheduler_name
-from src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock
-from typing import List
-import os, multiprocessing, json, time, logging, datetime
+from src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
+from typing import List, Dict, Any, Optional
+import os, multiprocessing, json, time, logging
 from datetime import datetime
 import croniter
 from src.core.logger import BlazeLogger
+from src.core.state import BlazeState
+from tabulate import tabulate
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class Blaze:
 
@@ -20,6 +23,7 @@ class Blaze:
             loop_interval: int = 1,
             job_file_path: str = "/tmp/scheduler_jobs.json",
             job_lock_path: str = "/tmp/scheduler_lock.json",
+            state_dir: str = "./log",
     ):
         self.name = generate_scheduler_name()
         self.blocks : BlazeBlock = blaze_blocks
@@ -37,6 +41,9 @@ class Blaze:
         self.is_running: bool = False
         self.is_paused: bool = False
         self.is_stopped: bool = False
+        
+        # Initialize state manager
+        self.state_manager = BlazeState(state_dir=state_dir)
 
         self.logger.info(f"Blaze {self.name} initialized")
         self.logger.info(f"Blaze running on pid:{os.getpid()} | Initialisation Completed")
@@ -86,13 +93,18 @@ class Blaze:
     
     def read_jobs(self) -> List[SubmitSequenceData]:
         if os.path.exists(self.job_file_path):
-            with open(self.job_file_path, "r") as f:
-                data = f.read()
-                json_data = json.loads(data)
-                print(json_data)
-                job_file = JobFile(**json_data)
-                if job_file:
-                    return job_file.submitted_jobs
+            # Check if file was modified in the last {loop_interval + 5} seconds
+            file_mod_time = os.path.getmtime(self.job_file_path)
+            current_time = time.time()
+            time_threshold = self.loop_interval + 5
+            
+            if current_time - file_mod_time <= time_threshold:
+                with open(self.job_file_path, "r") as f:
+                    data = f.read()
+                    json_data = json.loads(data)
+                    job_file = JobFile(**json_data)
+                    if job_file:
+                        return job_file.submitted_jobs  
         return []
 
     def read_and_verify_lock(self) -> BlazeLock:
@@ -110,39 +122,188 @@ class Blaze:
                 return lock_data
         return None
     
-    def validate_jobs(self, submitted_jobs: List[SubmitSequenceData]) -> List[JobExecutuionData]:
-        all_job_execution_data: List[JobExecutuionData] = []
+    def validate_jobs(self, submitted_jobs: List[SubmitSequenceData]):
         for job in submitted_jobs:
             seq_data = self._sequences.get_seq(job.seq_id)
             if job.end_date and job.end_date < datetime.now():
                 raise ValueError(f"Sequence {job.seq_id} end date is in the past")
             if job.start_date and job.end_date and job.start_date > job.end_date:
                 raise ValueError(f"Sequence {job.seq_id} start date is after end date")
-            execution_func = seq_data.sequence_func
-            job_execution_data = JobExecutuionData(
-                seq_id=job.seq_id,
-                parameters=job.parameters,
-                seq_run_interval=job.seq_run_interval,
-                start_date=job.start_date,
-                end_date=job.end_date,
-                execution_func=execution_func,
-            )
-            all_job_execution_data.append(job_execution_data)
-        return all_job_execution_data
-    
-    def get_next_run(self, job_execution_data: JobExecutuionData) -> datetime:
-        cron_iter = croniter.croniter(job_execution_data.seq_run_interval, job_execution_data.start_date)
-        return cron_iter.get_next(datetime)
 
+    
+    def get_next_run(self, job_execution_data: JobState) -> datetime:
+        """
+        Get the next run time for a job using the state manager.
+        
+        Args:
+            job_execution_data (JobState): The job data
+            
+        Returns:
+            datetime: The next run time
+        """
+        seq_id = job_execution_data.seq_id
+        seq_state = self.state_manager.get_sequence_state(seq_id)
+        
+        if seq_state and seq_state.next_run:
+            return seq_state.next_run
+            
+        # If no state exists yet or next_run is not set, calculate it
+        cron_iter = croniter.croniter(job_execution_data.seq_run_interval, job_execution_data.start_date)
+        next_run = cron_iter.get_next(datetime)
+        return next_run
+    
+    def status(self) -> str:
+        """
+        Generate a status report of all registered jobs.
+        
+        Returns:
+            str: Formatted status table
+        """
+        table = []
+        
+        # Get all sequence states from the state manager
+        for seq_id, seq_state in self.state_manager.sequences_state.items():
+            next_run = seq_state.next_run
+            last_run = seq_state.last_run
+            
+            # Calculate time until next run
+            if next_run:
+                now = datetime.now()
+                if next_run > now:
+                    time_to_run = next_run - now
+                    minutes = time_to_run.total_seconds() / 60
+                    next_run_display = f"{next_run.strftime('%Y-%m-%d %H:%M:%S')} (<{minutes:.1f}m)"
+                else:
+                    next_run_display = f"{next_run.strftime('%Y-%m-%d %H:%M:%S')} (due now)"
+            else:
+                next_run_display = "Not scheduled"
+            
+            # Determine status
+            if not last_run:
+                status = "Pending"
+            else:
+                status = "Active"
+                
+            # Format last run
+            last_run_display = last_run.strftime('%Y-%m-%d %H:%M:%S') if last_run else "Never run"
+            
+            table.append([seq_id, next_run_display, status, last_run_display])
+            
+        return tabulate(table, headers=["Sequence ID", "Next Run", "Status", "Last Run"], tablefmt="grid")
+
+
+    def execute(self, job_state: JobState):
+        """
+        Execute a sequence function with the provided parameters.
+        
+        Args:
+            seq_id (str): The ID of the sequence to execute
+            parameters (dict, optional): Parameters to pass to the sequence function. Defaults to {}.
+            
+        Returns:
+            dict: The execution context with results from all blocks in the sequence
+        """
+        self.logger.info(f"Executing sequence {job_state.seq_id} with parameters: {job_state.parameters}")
+        execution_func = job_state.execution_func
+        
+        try:
+            start_time = datetime.now()
+            result = execution_func(job_state.parameters)
+            end_time = datetime.now()
+            execution_time = (end_time - start_time).total_seconds()
+            
+            # Record successful execution in state manager
+            self.state_manager.record_execution(
+                seq_id=job_state.seq_id,
+                execution_result=result,
+                status=SequenceStatus.COMPLETED,
+                execution_time=execution_time
+            )
+            
+            self.logger.info(f"Sequence {job_state.seq_id} executed successfully in {execution_time:.2f} seconds")
+            return result
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error(f"Failed to execute sequence {job_state.seq_id}: {error_msg}")
+            
+            # Record failed execution in state manager
+            self.state_manager.record_execution(
+                seq_id=job_state.seq_id,
+                execution_result={},
+                status=SequenceStatus.FAILED,
+                execution_time=(datetime.now() - start_time).total_seconds(),
+                error=error_msg
+            )
+            
+            raise
+            
+    def _execute_job_with_state_update(self, job: JobState) -> None:
+        """
+        Execute a single job and update its state.
+        This is a helper method for threaded execution.
+        
+        Args:
+            job (JobState): The job to execute
+        """
+        self.logger.info(f"Executing job {job.seq_id} with parameters")
+        try:
+            self.execute(job)
+        except Exception as e:
+            self.logger.error(f"Error executing job {job.seq_id}: {str(e)}")
+            
+        # Update next run time after execution
+        self.state_manager.update_next_run(job.seq_id)
+
+    def check_and_add_jobs(self, submitted_jobs: List[SubmitSequenceData]):
+        """
+        Check if the jobs are already in the state and add them if they are not.
+        """
+        for job in submitted_jobs:
+            if job.seq_id not in self.state_manager.sequences_state:
+                self.state_manager.add_job(JobState(
+                    seq_id=job.seq_id,
+                    parameters=job.parameters,
+                    seq_run_interval=job.seq_run_interval,
+                    start_date=job.start_date,
+                    end_date=job.end_date,
+                    execution_func=self._sequences.get_seq(job.seq_id).sequence_func,
+                    run_state=SequenceStatus.PENDING
+                ))
+            
     def scheduler_loop(self):
         while self.is_running:
             self.read_and_verify_lock()
+            self.state_manager.print_state(self.loop_interval, self.name, os.getpid())
+            
+            # Process submitted jobs from job file
             submitted_jobs = self.read_jobs()
-            job_execution_data = self.validate_jobs(submitted_jobs)
-            if len(job_execution_data) == 0:
-                self.logger.info(f"No jobs to execute | Sleeping for {self.loop_interval} seconds")
+            if submitted_jobs:
+                self.validate_jobs(submitted_jobs)
+                self.check_and_add_jobs(submitted_jobs)
+            
+            # Check for due jobs in state manager
+            due_jobs = self.state_manager.get_due_jobs()
+            
+            if not due_jobs:
                 time.sleep(self.loop_interval)
                 continue
-            for job in job_execution_data:
-                self.logger.info(f"Executing job {job.seq_id} with parameters next running at {self.get_next_run(job)}")
+                
+            
+            # Execute jobs in parallel using ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Submit all jobs to the thread pool
+                future_to_job = {
+                    executor.submit(self._execute_job_with_state_update, job): job 
+                    for job in due_jobs
+                }
+                
+                # Wait for all jobs to complete
+                for future in as_completed(future_to_job):
+                    job = future_to_job[future]
+                    try:
+                        future.result()  # This will raise any exception that occurred
+                        self.logger.info(f"Job {job.seq_id} completed successfully")
+                    except Exception as e:
+                        self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}")
+            
             time.sleep(self.loop_interval)

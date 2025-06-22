@@ -75,6 +75,23 @@ class JobFile(BaseModel):
 class JobExecutuionData(SubmitSequenceData):
     execution_func: Callable
 
+    @field_serializer('execution_func')
+    def serialize_execution_func(self, value: Callable) -> str:
+        return value.__name__
+
+class JobState(JobExecutuionData):
+
+    run_state: SequenceStatus
+    last_run: Optional[datetime] = None
+    next_run: Optional[datetime] = None
+    latest_result: Optional[Dict[str, Any]] = None
+    error_logs: Optional[List[str]] = None
+    total_execution_time: Optional[float] = 0.0
+
+    @field_serializer('last_run', 'next_run')
+    def serialize_dates(self, value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
 
 class SequenceData(BaseModel):
 
