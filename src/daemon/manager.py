@@ -31,6 +31,7 @@ def get_or_create_scheduler(blaze_blocks: BlazeBlock, sequences: BlazeSequence):
             blaze_blocks=blaze_blocks,
             sequences=sequences,    
             logger=_logger,
+            loop_interval=5,
             job_lock_path=_LOCK_PATH,
             job_file_path=_JOBS_PATH,
         )
