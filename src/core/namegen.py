@@ -53,3 +53,12 @@ def generate_scheduler_name() -> str:
     element = random.choice(ELEMENTS)
     
     return f"{adjective}-{noun}-{element}"
+
+
+
+
+def generate_five_digit_number() -> str:
+    """
+    Generate a random 5-digit number.
+    """
+    return str(random.randint(10000, 99999))

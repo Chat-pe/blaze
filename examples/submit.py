@@ -8,9 +8,9 @@ update_jobs(submitted_jobs = [SubmitSequenceData(
     seq_run_interval="*/1 * * * *",
     parameters={
         "generate_numbers": {
-            "count": 20,
+            "count": 10,
             "min_val": 100,
-            "max_val": 1000
+            "max_val": 200
         },
         "calculate_statistics": {
             "numbers": "@generate_numbers"

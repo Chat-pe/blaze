@@ -5,6 +5,7 @@ from datetime import datetime
 
 from src.core.block import BlazeBlock
 from src.core._types import SeqData, SeqBlockData, SequenceExecutionData
+from src.core.logger import BlazeLogger
 
 T = TypeVar('T')
 
@@ -13,6 +14,7 @@ class BlazeSequence:
 
     def __init__(self):
         self.seq: Dict[str, SeqData] = {}
+        self.logger = None
 
     def _register_seq(self, seq_id: str, seq_data: SeqData):
         if seq_id in self.seq:
@@ -23,6 +25,9 @@ class BlazeSequence:
         if seq_id not in self.seq:
             raise ValueError(f"Sequence {seq_id} not found | Sequences: {self.seq.keys()}")
         return self.seq[seq_id]
+    
+    def set_logger(self, logger: BlazeLogger):
+        self.logger = logger
     
     def get_all_seq(self) -> List[SeqData]:
         return list(self.seq.values())
@@ -43,19 +48,17 @@ class BlazeSequence:
         if seq_run_timeout is None:
             seq_run_timeout = 3600
             
-        def sequencialise(parameters: Dict[str, Any] = {}) -> Dict[str, Any]:
+        def sequencialise(job_id: str, parameters: Dict[str, Any] = {}) -> Dict[str, Any]:
             local_retries = retries  # Use a local copy to avoid modifying the nonlocal
             execution_context = {}  # Create a new context for this execution
             
-            print(f"Starting sequence execution with {len(sequence)} blocks")
+            self.logger.info(f"Run {seq_id}/{job_id} - starting sequence with {len(sequence)} blocks")
 
             for seq_block in sequence:
-                print(f"Processing block: {seq_block.block_name}")
+                self.logger.info(f"Run {seq_id}/{job_id}/{seq_block.block_name} - processing")
                 try:
                     block = blocks._get_block(seq_block.block_name)
                     block_func = block.func
-                    
-                    print(f"Block function: {block_func}")
 
                     context_and_parameters = {}
                     for param, value in parameters.get(seq_block.block_name, {}).items():
@@ -68,8 +71,6 @@ class BlazeSequence:
                         else:
                             context_and_parameters[param] = value
                     
-                    print(f"Block parameters: {parameters}")
-                    
                     for dep in seq_block.dependencies:
                         if dep not in execution_context:
                             raise ValueError(f"Invalid dependency: {dep} | Not available in context {execution_context}")
@@ -81,32 +82,31 @@ class BlazeSequence:
                     
                     while not have_result and attempt < max_attempts:
                         try:
-                            print(f"Executing block {seq_block.block_name}, attempt {attempt+1}/{max_attempts}")
                             result = block_func(**context_and_parameters)
                             have_result = True
                             
                             # Store the result under the block name
                             execution_context[seq_block.block_name] = result
-                            print(f"Block {seq_block.block_name} executed successfully with result: {result}")
+                            self.logger.info(f"Run {seq_id}/{job_id}/{seq_block.block_name} - success with result: {str(result)[:10]}...{str(result)[-10:]}")
                                 
                         except Exception as e:
                             attempt += 1
-                            print(f"Block {seq_block.block_name} failed with error: {str(e)}")
+                            self.logger.error(f"Run {seq_id}/{job_id}/{seq_block.block_name} - failed with error: {str(e)}")
                             if attempt < max_attempts:
-                                print(f"Retrying in {retry_delay} seconds...")
+                                self.logger.warning(f"Retrying in {retry_delay} seconds...")
                                 time.sleep(retry_delay)
                             elif fail_stop:
                                 raise RuntimeError(f"Block {seq_block.block_name} failed with error: {str(e)}") from e
                             else: 
                                 execution_context[seq_block.block_name] = False
-                                print(f"Block {seq_block.block_name} marked as failed, continuing sequence")
+                                self.logger.warning(f"Run {seq_id}/{job_id}/{seq_block.block_name} - failed, continuing sequence")
                 except Exception as e:
-                    print(f"Error processing block {seq_block.block_name}: {str(e)}")
+                    self.logger.error(f"Run {seq_id}/{job_id}/{seq_block.block_name} - failed with error: {str(e)}")
                     if fail_stop:
                         raise
                     execution_context[seq_block.block_name] = False
 
-            print(f"Sequence execution completed with context: {execution_context}")
+            self.logger.info(f"Run {seq_id}/{job_id} - success with context: {execution_context}")
             return execution_context
 
         seq_data = SeqData(

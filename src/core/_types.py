@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 import inspect
 from enum import Enum
+from src.core.namegen import generate_five_digit_number
 
 class BlockData(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -30,6 +31,7 @@ class SeqData(BaseModel):
     sequence_func: Callable
 
 class SubmitSequenceData(BaseModel):
+
 
     seq_id: str
     parameters: Optional[Dict[str, Any]] = {}
@@ -80,13 +82,14 @@ class JobExecutuionData(SubmitSequenceData):
         return value.__name__
 
 class JobState(JobExecutuionData):
-
+    job_id: str
     run_state: SequenceStatus
     last_run: Optional[datetime] = None
     next_run: Optional[datetime] = None
     latest_result: Optional[Dict[str, Any]] = None
     error_logs: Optional[List[str]] = None
     total_execution_time: Optional[float] = 0.0
+    total_runs: Optional[int] = 0
 
     @field_serializer('last_run', 'next_run')
     def serialize_dates(self, value: Optional[datetime]) -> Optional[str]:
