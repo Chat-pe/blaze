@@ -16,51 +16,55 @@ class BlazeState:
     
     def __init__(self, state_dir: str = "./log"):
         """
-        Initialize the state manager with a directory for storing state data.
+        Initializes the BlazeState manager with a directory for storing job state files.
         
-        Args:
-            state_dir (str): Directory to store state files
+        Parameters:
+            state_dir (str): Path to the directory where job state data will be stored. Defaults to "./log".
         """
         self.state_dir = state_dir
         self.job_states: Dict[str, JobState] = {}
         self._ensure_state_directory()
     
     def _ensure_state_directory(self):
-        """Ensure the state directory exists."""
+        """
+        Creates the main state directory if it does not already exist.
+        """
         Path(self.state_dir).mkdir(parents=True, exist_ok=True)
     
     
     def _ensure_sequence_directory(self, seq_id: str):
-        """Ensure the sequence-specific directory exists."""
+        """
+        Create and return the directory path for the specified sequence ID within the state directory, ensuring it exists.
+        """
         seq_dir = os.path.join(self.state_dir, seq_id)
         Path(seq_dir).mkdir(parents=True, exist_ok=True)
         return seq_dir
     
     def get_sequence_state(self, job_id: str) -> Optional[SequenceData]:
         """
-        Get the current state for a sequence.
+        Retrieve the current state of a job by its job ID.
         
-        Args:
-            seq_id (str): Sequence ID
-            
         Returns:
-            Optional[SequenceData]: The sequence state if it exists, None otherwise
+            The job's state as a SequenceData object if found, otherwise None.
         """
         return self.job_states.get(job_id)
     
     def print_state(self, loop_interval: int, blaze_name: str, pid: int):
         """
-        Print the state of all jobs.
-
-        First print how many jobs are in the state
-        Then the time state will be next updated loop_interval + time now
-        then a table with job seq id, last run(Parsed into date and time), next run(like <12m), status
-        the whole thing should rewrite the screen
+        Display a real-time summary of all tracked Blaze jobs, including scheduling and execution statistics.
+        
+        Prints the total number of jobs, the scheduled time for the next state update, and a formatted table with job details such as job ID, sequence ID, last and next run times (with human-readable countdown), status, total and average execution time, and total runs. The output refreshes the terminal display to provide an up-to-date overview.
         """
 
         def seconds_to_human_readable(total_seconds):
             """
-            Convert seconds to human-readable time format
+            Convert a duration in seconds to a human-readable string, using approximate units such as seconds, minutes, hours, days, weeks, months, or years.
+            
+            Parameters:
+                total_seconds (float): The duration in seconds to convert.
+            
+            Returns:
+                str: A human-readable representation of the duration.
             """
             if total_seconds < 60:
                 return f"{int(total_seconds)}s" if total_seconds > 3 else "NOW"
@@ -100,13 +104,12 @@ class BlazeState:
     
     def add_job(self, job: JobState) -> SequenceData:
         """
-        Add a new job to the state or update an existing one.
+        Adds a new job to the state manager or updates an existing job's state.
         
-        Args:
-            job (JobState): The job data
-            
+        If the job is new, initializes its scheduling and execution tracking fields, calculates the next run time based on its cron schedule, and sets its run state to pending. Persists the job state to disk and returns the updated job state.
+        
         Returns:
-            SequenceData: The updated sequence state
+            SequenceData: The updated job state.
         """
         try:
             if not job.job_id in self.job_states.keys():
@@ -139,14 +142,14 @@ class BlazeState:
     
     def update_next_run(self, job_id: str, update_time: bool = True) -> Optional[datetime]:
         """
-        Update the next run time for a sequence based on its cron schedule.
+        Calculates and optionally updates the next scheduled run time for a job based on its cron expression.
         
-        Args:
-            seq_id (str): Sequence ID
-            update_time (bool): Whether to update the time or just return the next run
-            
+        Parameters:
+            job_id (str): The unique identifier of the job to update.
+            update_time (bool): If True, updates the job's next run time and persists the change; if False, only calculates and returns the next run time.
+        
         Returns:
-            Optional[datetime]: The next run time if the sequence exists, None otherwise
+            Optional[datetime]: The next scheduled run time, or None if the job has expired.
         """
         if job_id not in self.job_states:
             raise ValueError(f"Sequence {job_id} not found")
@@ -169,10 +172,10 @@ class BlazeState:
     
     def get_due_jobs(self) -> List[JobState]:
         """
-        Get all jobs that are due to run now.
+        Return a list of jobs whose next scheduled run time is now or in the past and that have not expired.
         
         Returns:
-            List[JobState]: List of jobs due to run
+            List[JobState]: Jobs ready to be executed.
         """
         now = datetime.now()
         due_jobs = []
@@ -189,15 +192,19 @@ class BlazeState:
                          status: SequenceStatus, execution_time: float, 
                          error: Optional[str] = None) -> JobState:
         """
-        Record the execution of a sequence.
-        
-        Args:
-            seq_id (str): Sequence ID
-            execution_result (Dict[str, Any]): The result of the execution
-            status (SequenceStatus): The status of the execution
-            execution_time (float): The time taken for execution in seconds
-            error (Optional[str]): Error message if the execution failed
-        """
+                         Records the result of a job execution, updating its status, execution statistics, error logs, and scheduling information.
+                         
+                         Parameters:
+                             job_id (str): The unique identifier of the job.
+                             seq_id (str): The sequence identifier associated with the job.
+                             execution_result (Dict[str, Any]): The output or result data from the execution.
+                             status (SequenceStatus): The final status of the execution.
+                             execution_time (float): Duration of the execution in seconds.
+                             error (Optional[str]): Error message if the execution failed.
+                         
+                         Returns:
+                             JobState: The updated job state reflecting the latest execution.
+                         """
         try:
             now = datetime.now()
             
@@ -244,10 +251,9 @@ class BlazeState:
     
     def _save_job_state(self, job_id: str):
         """
-        Save the state of a sequence to disk.
+        Persist the state of a job to disk as a JSON file.
         
-        Args:
-            seq_id (str): Sequence ID
+        The job state is serialized and saved to 'state.json' within the job's dedicated directory.
         """
         job_dir = self._ensure_sequence_directory(job_id)
         state_file = os.path.join(job_dir, "state.json")
@@ -260,11 +266,9 @@ class BlazeState:
     
     def _append_execution_record(self, job_id: str, record: Dict[str, Any]):
         """
-        Append an execution record to the sequence's run log.
+        Appends an execution record to the job's run log file.
         
-        Args:
-            seq_id (str): Sequence ID
-            record (Dict[str, Any]): Execution record
+        The record is added to the `runs.json` file in the job's state directory, creating or updating the file as needed.
         """
         job_dir = self._ensure_sequence_directory(job_id)
         run_file = os.path.join(job_dir, "runs.json")
