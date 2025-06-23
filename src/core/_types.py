@@ -3,7 +3,6 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 import inspect
 from enum import Enum
-from src.core.namegen import generate_five_digit_number
 
 class BlockData(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)

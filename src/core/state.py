@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 import croniter
 from pathlib import Path
-from src.core._types import SubmitSequenceData, SequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState, JobState
+from blaze.src.core._types import SubmitSequenceData, SequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState, JobState
 from tabulate import tabulate
 
 class BlazeState:

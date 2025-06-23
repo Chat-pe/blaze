@@ -1,6 +1,6 @@
 
-from src.core import SubmitSequenceData
-from src.daemon.manager import update_jobs
+from blaze.src.core import SubmitSequenceData
+from blaze.src.daemon.manager import update_jobs
 
 
 update_jobs(submitted_jobs = [SubmitSequenceData(

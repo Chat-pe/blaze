@@ -1,5 +1,5 @@
-from src.core.logger import BlazeLogger
-from src.core._types import SubmitSequenceData, JobFile, BlazeLock
+from blaze.src.core.logger import BlazeLogger
+from blaze.src.core._types import SubmitSequenceData, JobFile, BlazeLock
 from typing import List
 import os
 import json

@@ -1,13 +1,13 @@
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core.namegen import generate_scheduler_name
-from src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
+from blaze.src.core.block import BlazeBlock
+from blaze.src.core.seq import BlazeSequence
+from blaze.src.core.namegen import generate_scheduler_name
+from blaze.src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
 from typing import List, Dict, Any, Optional
 import os, multiprocessing, json, time, logging, hashlib
 from datetime import datetime
 import croniter
-from src.core.logger import BlazeLogger
-from src.core.state import BlazeState
+from blaze.src.core.logger import BlazeLogger
+from blaze.src.core.state import BlazeState
 from tabulate import tabulate
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

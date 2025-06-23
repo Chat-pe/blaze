@@ -9,15 +9,15 @@ from pathlib import Path
 import glob
 
 # Import types from the core module
-from src.core._types import (
+from blaze.src.core._types import (
     SubmitSequenceData, 
     BlazeLock, 
     JobFile, 
     SequenceStatus, 
     JobState
 )
-from src.core.jobs import BlazeJobs
-from src.core.logger import BlazeLogger
+from blaze.src.core.jobs import BlazeJobs
+from blaze.src.core.logger import BlazeLogger
 
 # Import configuration
 from config import (

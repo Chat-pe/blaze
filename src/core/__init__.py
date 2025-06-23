@@ -3,13 +3,13 @@ Blaze core module exports
 """
 
 # Export main classes
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core.blaze import Blaze
-from src.core.logger import BlazeLogger
-from src.core.jobs import BlazeJobs
+from blaze.src.core.block import BlazeBlock
+from blaze.src.core.seq import BlazeSequence
+from blaze.src.core.blaze import Blaze
+from blaze.src.core.logger import BlazeLogger
+from blaze.src.core.jobs import BlazeJobs
 # Export type definitions
-from src.core._types import (
+from blaze.src.core._types import (
     BlockData,
     SeqBlockData,
     SeqData,

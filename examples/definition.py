@@ -5,9 +5,9 @@ import signal
 import sys
 import os
 import json
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core._types import SeqBlockData
+from blaze.src.core.block import BlazeBlock
+from blaze.src.core.seq import BlazeSequence
+from blaze.src.core._types import SeqBlockData
 
 # Create a block manager
 blocks = BlazeBlock()

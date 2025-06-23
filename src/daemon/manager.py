@@ -1,10 +1,10 @@
-from src.core import Blaze
-from src.core import BlazeLogger
-from src.core import BlazeBlock
-from src.core import BlazeSequence
-from src.core import SubmitSequenceData
-from src.core import BlazeJobs
-from src.core import BlazeLock
+from blaze.src.core import Blaze
+from blaze.src.core import BlazeLogger
+from blaze.src.core import BlazeBlock
+from blaze.src.core import BlazeSequence
+from blaze.src.core import SubmitSequenceData
+from blaze.src.core import BlazeJobs
+from blaze.src.core import BlazeLock
 
 from typing import List
 import json

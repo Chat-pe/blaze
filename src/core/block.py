@@ -2,7 +2,7 @@ import functools
 import inspect 
 import time
 from typing import Callable, Optional, List, TypeVar, Dict, Any, Type
-from src.core._types import BlockData
+from blaze.src.core._types import BlockData
 from pydantic import BaseModel
 
 T = TypeVar('T')

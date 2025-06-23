@@ -3,9 +3,9 @@ import time
 from pydantic import BaseModel
 from datetime import datetime
 
-from src.core.block import BlazeBlock
-from src.core._types import SeqData, SeqBlockData, SequenceExecutionData
-from src.core.logger import BlazeLogger
+from blaze.src.core.block import BlazeBlock
+from blaze.src.core._types import SeqData, SeqBlockData, SequenceExecutionData
+from blaze.src.core.logger import BlazeLogger
 
 T = TypeVar('T')
 
@@ -109,6 +109,7 @@ class BlazeSequence:
             self.logger.info(f"Run {seq_id}/{job_id} - success with context: {execution_context}")
             return execution_context
 
+        print(type(sequence))
         seq_data = SeqData(
             seq_id=seq_id,
             description=description,
