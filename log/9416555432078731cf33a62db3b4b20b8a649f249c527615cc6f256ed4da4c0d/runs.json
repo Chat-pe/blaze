@@ -1,0 +1,16 @@
+[
+  {
+    "status": "FAILED",
+    "job_id": "9416555432078731cf33a62db3b4b20b8a649f249c527615cc6f256ed4da4c0d",
+    "start_time": "2025-06-23T15:21:01.066870",
+    "execution_time": 0.002438,
+    "error": "'BlazeLogger' object has no attribute 'success'"
+  },
+  {
+    "status": "FAILED",
+    "job_id": "9416555432078731cf33a62db3b4b20b8a649f249c527615cc6f256ed4da4c0d",
+    "start_time": "2025-06-23T15:22:01.123277",
+    "execution_time": 0.003047,
+    "error": "'BlazeLogger' object has no attribute 'success'"
+  }
+]

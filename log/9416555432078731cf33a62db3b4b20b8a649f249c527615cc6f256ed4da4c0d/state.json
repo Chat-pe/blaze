@@ -1,0 +1,31 @@
+{
+  "seq_id": "math_pipeline_1",
+  "parameters": {
+    "generate_numbers": {
+      "count": 10,
+      "min_val": 100,
+      "max_val": 200
+    },
+    "calculate_statistics": {
+      "numbers": "@generate_numbers"
+    },
+    "transform_data": {
+      "stats": "@calculate_statistics"
+    }
+  },
+  "seq_run_interval": "*/1 * * * *",
+  "start_date": "2025-06-23T15:20:27.140404",
+  "end_date": "2025-07-23T15:20:27.140408",
+  "execution_func": "sequencialise",
+  "job_id": "9416555432078731cf33a62db3b4b20b8a649f249c527615cc6f256ed4da4c0d",
+  "run_state": "FAILED",
+  "last_run": "2025-06-23T15:22:01.123277",
+  "next_run": "2025-06-23T15:23:00",
+  "latest_result": {},
+  "error_logs": [
+    "2025-06-23T15:21:01.069308: 'BlazeLogger' object has no attribute 'success'",
+    "2025-06-23T15:22:01.126324: 'BlazeLogger' object has no attribute 'success'"
+  ],
+  "total_execution_time": 0.005485,
+  "total_runs": 2
+}

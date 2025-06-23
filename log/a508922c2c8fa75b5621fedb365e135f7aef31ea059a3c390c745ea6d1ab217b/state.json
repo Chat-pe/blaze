@@ -1,0 +1,65 @@
+{
+  "seq_id": "math_pipeline_1",
+  "parameters": {
+    "generate_numbers": {
+      "count": 10,
+      "min_val": 100,
+      "max_val": 200
+    },
+    "calculate_statistics": {
+      "numbers": "@generate_numbers"
+    },
+    "transform_data": {
+      "stats": "@calculate_statistics"
+    }
+  },
+  "seq_run_interval": "*/1 * * * *",
+  "start_date": "2025-06-23T15:10:16.342859",
+  "end_date": "2025-07-23T15:10:16.342865",
+  "execution_func": "sequencialise",
+  "job_id": "a508922c2c8fa75b5621fedb365e135f7aef31ea059a3c390c745ea6d1ab217b",
+  "run_state": "COMPLETED",
+  "last_run": "2025-06-23T15:20:03.108190",
+  "next_run": "2025-06-23T15:21:00",
+  "latest_result": {
+    "generate_numbers": [
+      196,
+      161,
+      123,
+      106,
+      116,
+      149,
+      120,
+      170,
+      106,
+      183
+    ],
+    "calculate_statistics": {
+      "mean": 143.0,
+      "median": 136.0,
+      "min": 106,
+      "max": 196,
+      "sum": 1430
+    },
+    "transform_data": {
+      "mean": 143.0,
+      "median": 136.0,
+      "min": 106,
+      "max": 196,
+      "sum": 1430,
+      "range": 90,
+      "normalized_mean": 0.7295918367346939,
+      "squared_sum": 2044900,
+      "doubled_values": {
+        "mean": 286.0,
+        "median": 272.0,
+        "min": 212,
+        "max": 392,
+        "sum": 2860
+      }
+    }
+  },
+  "error_logs": [],
+  "total_execution_time": 0.021959000000000003,
+  "total_runs": 10
+}

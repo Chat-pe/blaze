@@ -3,7 +3,7 @@ from src.core.seq import BlazeSequence
 from src.core.namegen import generate_scheduler_name
 from src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
 from typing import List, Dict, Any, Optional
-import os, multiprocessing, json, time, logging
+import os, multiprocessing, json, time, logging, hashlib
 from datetime import datetime
 import croniter
 from src.core.logger import BlazeLogger
@@ -47,6 +47,8 @@ class Blaze:
 
         self.logger.info(f"Blaze {self.name} initialized")
         self.logger.info(f"Blaze running on pid:{os.getpid()} | Initialisation Completed")
+
+        self._sequences.set_logger(self.logger)
 
         if self.auto_start:
             self.start()
@@ -97,7 +99,7 @@ class Blaze:
             file_mod_time = os.path.getmtime(self.job_file_path)
             current_time = time.time()
             time_threshold = self.loop_interval + 5
-            
+
             if current_time - file_mod_time <= time_threshold:
                 with open(self.job_file_path, "r") as f:
                     data = f.read()
@@ -151,45 +153,6 @@ class Blaze:
         cron_iter = croniter.croniter(job_execution_data.seq_run_interval, job_execution_data.start_date)
         next_run = cron_iter.get_next(datetime)
         return next_run
-    
-    def status(self) -> str:
-        """
-        Generate a status report of all registered jobs.
-        
-        Returns:
-            str: Formatted status table
-        """
-        table = []
-        
-        # Get all sequence states from the state manager
-        for seq_id, seq_state in self.state_manager.sequences_state.items():
-            next_run = seq_state.next_run
-            last_run = seq_state.last_run
-            
-            # Calculate time until next run
-            if next_run:
-                now = datetime.now()
-                if next_run > now:
-                    time_to_run = next_run - now
-                    minutes = time_to_run.total_seconds() / 60
-                    next_run_display = f"{next_run.strftime('%Y-%m-%d %H:%M:%S')} (<{minutes:.1f}m)"
-                else:
-                    next_run_display = f"{next_run.strftime('%Y-%m-%d %H:%M:%S')} (due now)"
-            else:
-                next_run_display = "Not scheduled"
-            
-            # Determine status
-            if not last_run:
-                status = "Pending"
-            else:
-                status = "Active"
-                
-            # Format last run
-            last_run_display = last_run.strftime('%Y-%m-%d %H:%M:%S') if last_run else "Never run"
-            
-            table.append([seq_id, next_run_display, status, last_run_display])
-            
-        return tabulate(table, headers=["Sequence ID", "Next Run", "Status", "Last Run"], tablefmt="grid")
 
 
     def execute(self, job_state: JobState):
@@ -203,24 +166,24 @@ class Blaze:
         Returns:
             dict: The execution context with results from all blocks in the sequence
         """
-        self.logger.info(f"Executing sequence {job_state.seq_id} with parameters: {job_state.parameters}")
         execution_func = job_state.execution_func
         
         try:
             start_time = datetime.now()
-            result = execution_func(job_state.parameters)
+            result = execution_func(job_state.job_id[:3]+"..."+job_state.job_id[-5:], job_state.parameters)
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
             
             # Record successful execution in state manager
             self.state_manager.record_execution(
+                job_id=job_state.job_id,
                 seq_id=job_state.seq_id,
                 execution_result=result,
                 status=SequenceStatus.COMPLETED,
                 execution_time=execution_time
             )
             
-            self.logger.info(f"Sequence {job_state.seq_id} executed successfully in {execution_time:.2f} seconds")
+            self.logger.info(f"Run {job_state.seq_id}/{job_state.job_id} - success in {execution_time:.2f} seconds")
             return result
         except Exception as e:
             error_msg = str(e)
@@ -228,6 +191,7 @@ class Blaze:
             
             # Record failed execution in state manager
             self.state_manager.record_execution(
+                job_id=job_state.job_id,
                 seq_id=job_state.seq_id,
                 execution_result={},
                 status=SequenceStatus.FAILED,
@@ -245,30 +209,33 @@ class Blaze:
         Args:
             job (JobState): The job to execute
         """
-        self.logger.info(f"Executing job {job.seq_id} with parameters")
         try:
             self.execute(job)
         except Exception as e:
-            self.logger.error(f"Error executing job {job.seq_id}: {str(e)}")
+            self.logger.error(f"Error executing job {job.job_id }: {str(e)}")
             
         # Update next run time after execution
-        self.state_manager.update_next_run(job.seq_id)
+        self.state_manager.update_next_run(job.job_id)
 
     def check_and_add_jobs(self, submitted_jobs: List[SubmitSequenceData]):
         """
         Check if the jobs are already in the state and add them if they are not.
         """
-        for job in submitted_jobs:
-            if job.seq_id not in self.state_manager.sequences_state:
-                self.state_manager.add_job(JobState(
-                    seq_id=job.seq_id,
-                    parameters=job.parameters,
-                    seq_run_interval=job.seq_run_interval,
-                    start_date=job.start_date,
-                    end_date=job.end_date,
-                    execution_func=self._sequences.get_seq(job.seq_id).sequence_func,
-                    run_state=SequenceStatus.PENDING
-                ))
+        sub_jobs = {hashlib.sha256(str(job).encode()).hexdigest():job for job in submitted_jobs }
+        sub_keys = set(sub_jobs.keys())
+        state_jobs = set(self.state_manager.job_states.keys())
+        new_jobs = sub_keys - state_jobs
+        for job_id in new_jobs:
+            self.state_manager.add_job(JobState(
+                job_id=job_id,
+                seq_id=sub_jobs[job_id].seq_id,
+                parameters=sub_jobs[job_id].parameters,
+                seq_run_interval=sub_jobs[job_id].seq_run_interval,
+                start_date=sub_jobs[job_id].start_date,
+                end_date=sub_jobs[job_id].end_date,
+                run_state=SequenceStatus.PENDING,
+                execution_func=self._sequences.get_seq(sub_jobs[job_id].seq_id).sequence_func,
+            ))
             
     def scheduler_loop(self):
         while self.is_running:
@@ -302,7 +269,6 @@ class Blaze:
                     job = future_to_job[future]
                     try:
                         future.result()  # This will raise any exception that occurred
-                        self.logger.info(f"Job {job.seq_id} completed successfully")
                     except Exception as e:
                         self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}")
             
