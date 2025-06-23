@@ -43,10 +43,10 @@ ELEMENTS = [
 
 def generate_scheduler_name() -> str:
     """
-    Generate a random 3-word hyphenated name for a daemon instance.
+    Generate a random three-word hyphenated name for identifying a daemon instance.
     
     Returns:
-        A string like "swift-dragon-inferno"
+        str: A string in the format "<adjective>-<noun>-<element>", such as "swift-dragon-inferno".
     """
     adjective = random.choice(ADJECTIVES)
     noun = random.choice(NOUNS)
@@ -59,6 +59,9 @@ def generate_scheduler_name() -> str:
 
 def generate_five_digit_number() -> str:
     """
-    Generate a random 5-digit number.
+    Generate a random five-digit number as a string.
+    
+    Returns:
+        str: A string representing a randomly generated five-digit number between 10000 and 99999 inclusive.
     """
     return str(random.randint(10000, 99999))

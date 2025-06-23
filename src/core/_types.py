@@ -79,6 +79,15 @@ class JobExecutuionData(SubmitSequenceData):
 
     @field_serializer('execution_func')
     def serialize_execution_func(self, value: Callable) -> str:
+        """
+        Serialize a callable execution function by returning its name as a string.
+        
+        Parameters:
+            value (Callable): The function to serialize.
+        
+        Returns:
+            str: The name of the provided function.
+        """
         return value.__name__
 
 class JobState(JobExecutuionData):
@@ -93,6 +102,15 @@ class JobState(JobExecutuionData):
 
     @field_serializer('last_run', 'next_run')
     def serialize_dates(self, value: Optional[datetime]) -> Optional[str]:
+        """
+        Convert a datetime object to an ISO 8601 formatted string.
+        
+        Parameters:
+            value (Optional[datetime]): The datetime object to serialize.
+        
+        Returns:
+            Optional[str]: The ISO 8601 string representation of the datetime, or None if value is None.
+        """
         return value.isoformat() if value else None
 
 

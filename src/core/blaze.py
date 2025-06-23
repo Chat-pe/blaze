@@ -25,7 +25,23 @@ class Blaze:
             job_lock_path: str = "/tmp/scheduler_lock.json",
             state_dir: str = "./log",
     ):
-        self.name = generate_scheduler_name()
+        """
+            Initialize a Blaze scheduler instance for managing concurrent job execution and persistent state.
+            
+            Parameters:
+                blaze_blocks (BlazeBlock): The set of available task blocks for job execution.
+                sequences (BlazeSequence): The collection of executable sequences.
+                logger (BlazeLogger): Logger for recording scheduler activity.
+                max_workers (int, optional): Maximum number of concurrent worker threads. Defaults to 1 or CPU count.
+                auto_start (bool, optional): Whether to start the scheduler loop automatically. Defaults to True.
+                loop_interval (int, optional): Time in seconds between scheduler loop iterations. Defaults to 1.
+                job_file_path (str, optional): Path to the file storing submitted jobs. Defaults to "/tmp/scheduler_jobs.json".
+                job_lock_path (str, optional): Path to the file used for scheduler locking. Defaults to "/tmp/scheduler_lock.json".
+                state_dir (str, optional): Directory for persistent state storage. Defaults to "./log".
+            
+            The scheduler initializes internal state, sets up logging, configures concurrency, and optionally starts the main scheduling loop.
+            """
+            self.name = generate_scheduler_name()
         self.blocks : BlazeBlock = blaze_blocks
         self._sequences: BlazeSequence = sequences
         self.logger: BlazeLogger = logger
@@ -94,6 +110,12 @@ class Blaze:
 
     
     def read_jobs(self) -> List[SubmitSequenceData]:
+        """
+        Read and return recently submitted jobs from the job file.
+        
+        Returns:
+            List[SubmitSequenceData]: A list of submitted jobs if the job file exists and was modified within the recent interval; otherwise, an empty list.
+        """
         if os.path.exists(self.job_file_path):
             # Check if file was modified in the last {loop_interval + 5} seconds
             file_mod_time = os.path.getmtime(self.job_file_path)
@@ -135,13 +157,13 @@ class Blaze:
     
     def get_next_run(self, job_execution_data: JobState) -> datetime:
         """
-        Get the next run time for a job using the state manager.
+        Determine the next scheduled run time for a job, using the state manager if available or calculating it from the job's cron interval and start date.
         
-        Args:
-            job_execution_data (JobState): The job data
-            
+        Parameters:
+            job_execution_data (JobState): The job whose next run time is being determined.
+        
         Returns:
-            datetime: The next run time
+            datetime: The next scheduled run time for the job.
         """
         seq_id = job_execution_data.seq_id
         seq_state = self.state_manager.get_sequence_state(seq_id)
@@ -157,14 +179,13 @@ class Blaze:
 
     def execute(self, job_state: JobState):
         """
-        Execute a sequence function with the provided parameters.
+        Executes the sequence function associated with the given job and records the execution result in the state manager.
         
-        Args:
-            seq_id (str): The ID of the sequence to execute
-            parameters (dict, optional): Parameters to pass to the sequence function. Defaults to {}.
-            
+        Parameters:
+            job_state (JobState): The job state containing execution details and parameters.
+        
         Returns:
-            dict: The execution context with results from all blocks in the sequence
+            dict: The result returned by the sequence function.
         """
         execution_func = job_state.execution_func
         
@@ -203,11 +224,9 @@ class Blaze:
             
     def _execute_job_with_state_update(self, job: JobState) -> None:
         """
-        Execute a single job and update its state.
-        This is a helper method for threaded execution.
+        Executes a job and updates its next scheduled run time in the state manager.
         
-        Args:
-            job (JobState): The job to execute
+        Intended for use as a helper in concurrent job execution. Logs any execution errors.
         """
         try:
             self.execute(job)
@@ -219,7 +238,10 @@ class Blaze:
 
     def check_and_add_jobs(self, submitted_jobs: List[SubmitSequenceData]):
         """
-        Check if the jobs are already in the state and add them if they are not.
+        Adds new jobs to the state manager if they are not already present, using SHA-256 hashes of job data as unique job IDs.
+        
+        Parameters:
+            submitted_jobs (List[SubmitSequenceData]): List of jobs to be checked and potentially added.
         """
         sub_jobs = {hashlib.sha256(str(job).encode()).hexdigest():job for job in submitted_jobs }
         sub_keys = set(sub_jobs.keys())
@@ -238,6 +260,11 @@ class Blaze:
             ))
             
     def scheduler_loop(self):
+        """
+        Main scheduler loop that manages job state, scheduling, and concurrent execution.
+        
+        Continuously reads and verifies the job lock, processes new job submissions, validates and adds jobs to the state manager, and executes due jobs concurrently using a thread pool. The loop respects pause and stop signals via the lock file and sleeps for the configured interval between cycles.
+        """
         while self.is_running:
             self.read_and_verify_lock()
             self.state_manager.print_state(self.loop_interval, self.name, os.getpid())
