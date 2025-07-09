@@ -11,6 +11,7 @@ import json
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import hashlib
 
 load_dotenv()
 
@@ -67,7 +68,10 @@ def update_jobs(submitted_jobs: List[SubmitSequenceData]):
     
     jobs = BlazeJobs(lock_path=_LOCK_PATH, logger=_logger, mongo_client=_scheduler.mongo_client if _scheduler else None)
     check = jobs.update_jobs(submitted_jobs)
+    hex_digest = []
+    for job in submitted_jobs:
+        hex_digest.append(hashlib.sha256(str(job).encode()).hexdigest())
     if check:
-        return True
+        return hex_digest
     else:
-        return False
+        return None

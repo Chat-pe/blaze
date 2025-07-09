@@ -22,6 +22,7 @@ uvicorn = "^0.34.3"
 fastapi = "^0.115.13"
 pymongo = "^4.13.2"
 python-dotenv = "^1.0.0"
+dotenv = "^0.9.9"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
