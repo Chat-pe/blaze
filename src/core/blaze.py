@@ -10,6 +10,7 @@ from src.core.logger import BlazeLogger
 from src.core.state import BlazeState
 from tabulate import tabulate
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from src.db.mongo import BlazeMongoClient
 
 class Blaze:
 
@@ -24,6 +25,7 @@ class Blaze:
             job_file_path: str = "/tmp/scheduler_jobs.json",
             job_lock_path: str = "/tmp/scheduler_lock.json",
             state_dir: str = "./log",
+            mongo_uri: Optional[str] = None,
     ):
         self.name = generate_scheduler_name()
         self.blocks : BlazeBlock = blaze_blocks
@@ -42,8 +44,24 @@ class Blaze:
         self.is_paused: bool = False
         self.is_stopped: bool = False
         
-        # Initialize state manager
-        self.state_manager = BlazeState(state_dir=state_dir)
+        # Initialize MongoDB client if URI is provided
+        self.mongo_client = None
+        if mongo_uri:
+            try:
+                self.mongo_client = BlazeMongoClient(mongo_uri)
+                if self.mongo_client.test_connection():
+                    self.logger.info("MongoDB connection established successfully")
+                    # Pass mongo client to logger
+                    self.logger.set_mongo_client(self.mongo_client)
+                else:
+                    self.logger.warning("MongoDB connection failed, continuing without MongoDB backup")
+                    self.mongo_client = None
+            except Exception as e:
+                self.logger.error(f"Failed to initialize MongoDB client: {str(e)}")
+                self.mongo_client = None
+        
+        # Initialize state manager with mongo client
+        self.state_manager = BlazeState(state_dir=state_dir, mongo_client=self.mongo_client)
 
         self.logger.info(f"Blaze {self.name} initialized")
         self.logger.info(f"Blaze running on pid:{os.getpid()} | Initialisation Completed")
@@ -72,6 +90,10 @@ class Blaze:
         )
         with open(self.job_lock_path, "w") as f:
             json.dump(job_lock.model_dump(mode='json'), f)
+        
+        # Also save to MongoDB if available
+        if self.mongo_client:
+            self.mongo_client.create_lock(job_lock)
 
         self.scheduler_loop()
 
@@ -183,11 +205,11 @@ class Blaze:
                 execution_time=execution_time
             )
             
-            self.logger.info(f"Run {job_state.seq_id}/{job_state.job_id} - success in {execution_time:.2f} seconds")
+            self.logger.info(f"Run {job_state.seq_id}/{job_state.job_id} - success in {execution_time:.2f} seconds", job_id=job_state.job_id)
             return result
         except Exception as e:
             error_msg = str(e)
-            self.logger.error(f"Failed to execute sequence {job_state.seq_id}: {error_msg}")
+            self.logger.error(f"Failed to execute sequence {job_state.seq_id}: {error_msg}", job_id=job_state.job_id)
             
             # Record failed execution in state manager
             self.state_manager.record_execution(
@@ -212,7 +234,7 @@ class Blaze:
         try:
             self.execute(job)
         except Exception as e:
-            self.logger.error(f"Error executing job {job.job_id }: {str(e)}")
+            self.logger.error(f"Error executing job {job.job_id }: {str(e)}", job_id=job.job_id)
             
         # Update next run time after execution
         self.state_manager.update_next_run(job.job_id)
@@ -270,6 +292,6 @@ class Blaze:
                     try:
                         future.result()  # This will raise any exception that occurred
                     except Exception as e:
-                        self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}")
+                        self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}", job_id=job.job_id)
             
             time.sleep(self.loop_interval)

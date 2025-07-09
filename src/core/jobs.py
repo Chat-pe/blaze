@@ -1,16 +1,20 @@
 from src.core.logger import BlazeLogger
 from src.core._types import SubmitSequenceData, JobFile, BlazeLock
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
 import os
 import json
 from datetime import datetime
 
+if TYPE_CHECKING:
+    from src.db.mongo import BlazeMongoClient
+
 class BlazeJobs:
 
-    def __init__(self, lock_path: str, logger: BlazeLogger):
+    def __init__(self, lock_path: str, logger: BlazeLogger, mongo_client: Optional['BlazeMongoClient'] = None):
 
         self.lock_path = lock_path
         self.logger = logger
+        self.mongo_client = mongo_client
 
         #check if lock file exists
         if os.path.exists(self.lock_path):
@@ -40,7 +44,15 @@ class BlazeJobs:
         try:
             with open(self.blaze_lock.job_file_path, "w") as f:
                 json.dump(job_file.model_dump(mode='json'), f)
-                return True
+            
+            # Also save to MongoDB if available
+            if self.mongo_client:
+                try:
+                    self.mongo_client.create_job_file(job_file)
+                except Exception as mongo_e:
+                    self.logger.warning(f"Failed to save job file to MongoDB: {mongo_e}")
+            
+            return True
         except Exception as e:
             self.logger.error(f"Error creating job file: {e}")
             raise e

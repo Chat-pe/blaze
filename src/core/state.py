@@ -1,12 +1,15 @@
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 import croniter
 from pathlib import Path
 from src.core._types import SubmitSequenceData, SequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState, JobState
 from tabulate import tabulate
+
+if TYPE_CHECKING:
+    from src.db.mongo import BlazeMongoClient
 
 class BlazeState:
     """
@@ -14,15 +17,17 @@ class BlazeState:
     Keeps track of next run times, past executions, and results.
     """
     
-    def __init__(self, state_dir: str = "./log"):
+    def __init__(self, state_dir: str = "./log", mongo_client: Optional['BlazeMongoClient'] = None):
         """
         Initialize the state manager with a directory for storing state data.
         
         Args:
             state_dir (str): Directory to store state files
+            mongo_client (Optional[BlazeMongoClient]): MongoDB client for backup
         """
         self.state_dir = state_dir
         self.job_states: Dict[str, JobState] = {}
+        self.mongo_client = mongo_client
         self._ensure_state_directory()
     
     def _ensure_state_directory(self):
@@ -257,6 +262,14 @@ class BlazeState:
             job_data = self.job_states[job_id]
             job_dict = job_data.model_dump(mode='json')
             json.dump(job_dict, f, indent=2)
+        
+        # Also save to MongoDB if available
+        if self.mongo_client:
+            try:
+                self.mongo_client.create_job_state(job_data)
+            except Exception:
+                # Don't fail if MongoDB write fails
+                pass
     
     def _append_execution_record(self, job_id: str, record: Dict[str, Any]):
         """
@@ -285,3 +298,11 @@ class BlazeState:
         # Save updated records
         with open(run_file, "w") as f:
             json.dump(runs, f, indent=2)
+        
+        # Also save to MongoDB if available
+        if self.mongo_client:
+            try:
+                self.mongo_client.create_job_run(job_id, record)
+            except Exception:
+                # Don't fail if MongoDB write fails
+                pass
