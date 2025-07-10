@@ -3,13 +3,14 @@ from src.core.seq import BlazeSequence
 from src.core.namegen import generate_scheduler_name
 from src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
 from typing import List, Dict, Any, Optional
-import os, multiprocessing, json, time, logging, hashlib
+import os, multiprocessing, json, time, logging, hashlib, signal, sys
 from datetime import datetime
 import croniter
 from src.core.logger import BlazeLogger
 from src.core.state import BlazeState
 from tabulate import tabulate
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from src.db.mongo import BlazeMongoClient
 
 class Blaze:
 
@@ -24,6 +25,7 @@ class Blaze:
             job_file_path: str = "/tmp/scheduler_jobs.json",
             job_lock_path: str = "/tmp/scheduler_lock.json",
             state_dir: str = "./log",
+            mongo_uri: Optional[str] = None,
     ):
         self.name = generate_scheduler_name()
         self.blocks : BlazeBlock = blaze_blocks
@@ -41,23 +43,193 @@ class Blaze:
         self.is_running: bool = False
         self.is_paused: bool = False
         self.is_stopped: bool = False
+        self.shutdown_requested: bool = False
         
-        # Initialize state manager
-        self.state_manager = BlazeState(state_dir=state_dir)
+        # Initialize MongoDB client if URI is provided
+        self.mongo_client = None
+        if mongo_uri:
+            try:
+                self.mongo_client = BlazeMongoClient(mongo_uri)
+                if self.mongo_client.test_connection():
+                    self.logger.info("MongoDB connection established successfully")
+                    # Pass mongo client to logger
+                    self.logger.set_mongo_client(self.mongo_client)
+                else:
+                    self.logger.warning("MongoDB connection failed, continuing without MongoDB backup")
+                    self.mongo_client = None
+            except Exception as e:
+                self.logger.error(f"Failed to initialize MongoDB client: {str(e)}")
+                self.mongo_client = None
+        
+        # Initialize state manager with mongo client
+        self.state_manager = BlazeState(state_dir=state_dir, mongo_client=self.mongo_client)
 
         self.logger.info(f"Blaze {self.name} initialized")
         self.logger.info(f"Blaze running on pid:{os.getpid()} | Initialisation Completed")
 
         self._sequences.set_logger(self.logger)
+        
+        # Set up signal handler for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
 
         if self.auto_start:
             self.start()
 
-    def start(self):
-        self.is_running = True
-        self.is_paused = False
-        self.is_stopped = False
+    def _signal_handler(self, signum, frame):
+        """Handle SIGINT (Ctrl+C) and SIGTERM signals for graceful shutdown."""
+        if self.shutdown_requested:
+            self.logger.info("Force shutdown requested. Exiting immediately.")
+            sys.exit(1)
         
+        self.shutdown_requested = True
+        self.logger.info("Shutdown signal received. Choose shutdown type:")
+        
+        while True:
+            try:
+                print("\nShutdown Options:")
+                print("1. Hard Stop - Delete all files and clear MongoDB")
+                print("2. Soft Stop - Leave files intact for resume")
+                print("3. Cancel - Continue running")
+                
+                choice = input("\nEnter your choice (1/2/3): ").strip()
+                
+                if choice == '1':
+                    self.logger.info("Hard stop selected. Performing complete cleanup...")
+                    self.hard_stop()
+                    break
+                elif choice == '2':
+                    self.logger.info("Soft stop selected. Leaving files intact...")
+                    self.soft_stop()
+                    break
+                elif choice == '3':
+                    self.logger.info("Shutdown cancelled. Continuing operation...")
+                    self.shutdown_requested = False
+                    return
+                else:
+                    print("Invalid choice. Please enter 1, 2, or 3.")
+                    
+            except (EOFError, KeyboardInterrupt):
+                self.logger.info("Force shutdown requested. Exiting immediately.")
+                sys.exit(1)
+
+    def _check_existing_state(self):
+        """Check for existing state on initialization and resume if found."""
+        local_lock_exists = os.path.exists(self.job_lock_path)
+        mongo_lock_exists = False
+        
+        if self.mongo_client:
+            mongo_lock = self.mongo_client.fetch_lock(self.name)
+            mongo_lock_exists = mongo_lock is not None
+        
+        # If both exist, verify they match
+        if local_lock_exists and mongo_lock_exists:
+            local_lock = self.read_and_verify_lock()
+            mongo_lock = self.mongo_client.fetch_lock(self.name)
+            
+            if local_lock and mongo_lock:
+                if local_lock.last_updated != mongo_lock.last_updated:
+                    self.logger.warning("State mismatch detected between local and MongoDB. Using most recent...")
+                    if local_lock.last_updated > mongo_lock.last_updated:
+                        self.mongo_client.create_lock(local_lock)
+                    else:
+                        self._restore_from_mongo_lock(mongo_lock)
+                self.logger.info("Resuming from existing state...")
+                return True
+        
+        # If only local exists, sync to MongoDB
+        elif local_lock_exists and not mongo_lock_exists:
+            if self.mongo_client:
+                local_lock = self.read_and_verify_lock()
+                if local_lock:
+                    self.mongo_client.create_lock(local_lock)
+                    self.logger.info("Synced local state to MongoDB...")
+            self.logger.info("Resuming from local state...")
+            return True
+        
+        # If only MongoDB exists, restore to local
+        elif not local_lock_exists and mongo_lock_exists:
+            mongo_lock = self.mongo_client.fetch_lock(self.name)
+            if mongo_lock:
+                self._restore_from_mongo_lock(mongo_lock)
+                self.logger.info("Restored state from MongoDB...")
+                return True
+        
+        return False
+
+    def _restore_from_mongo_lock(self, mongo_lock: BlazeLock):
+        """Restore local state from MongoDB lock."""
+        with open(self.job_lock_path, "w") as f:
+            json.dump(mongo_lock.model_dump(mode='json'), f)
+        
+        # Also restore job states if they exist in MongoDB
+        if self.mongo_client:
+            job_states = self.mongo_client.fetch_all_job_states()
+            for job_state in job_states:
+                self.state_manager.job_states[job_state.job_id] = job_state
+                self.state_manager._save_job_state(job_state.job_id)
+
+    def hard_stop(self):
+        """Perform hard stop: delete all files and clear MongoDB."""
+        self.is_running = False
+        self.is_stopped = True
+        
+        # Delete local files
+        self.remove_lock()
+        self.remove_jobs()
+        self._remove_log_files()
+        
+        # Clear MongoDB if available
+        if self.mongo_client:
+            self.mongo_client.delete_lock(self.name)
+            self.mongo_client.delete_job_file(self.name)
+            
+            # Delete all job states and their runs
+            job_states = self.mongo_client.fetch_all_job_states()
+            for job_state in job_states:
+                self.mongo_client.delete_job_state(job_state.job_id)
+                self.mongo_client.delete_job_runs(job_state.job_id)
+            
+            # Delete logs for this scheduler
+            self.mongo_client.delete_logs()
+        
+        self.logger.info("Hard stop completed. All data cleared.")
+        sys.exit(0)
+
+    def soft_stop(self):
+        """Perform soft stop: leave files intact for resume."""
+        self.is_running = False
+        self.is_paused = True
+        
+        # Update lock file to indicate paused state
+        if os.path.exists(self.job_lock_path):
+            with open(self.job_lock_path, "r") as f:
+                lock_data = json.load(f)
+                lock_data['is_paused'] = True
+                lock_data['is_running'] = False
+                lock_data['last_updated'] = datetime.now().isoformat()
+            
+            with open(self.job_lock_path, "w") as f:
+                json.dump(lock_data, f)
+        
+        # Update MongoDB lock if available
+        if self.mongo_client:
+            self.mongo_client.update_lock(self.name, {
+                'is_paused': True,
+                'is_running': False
+            })
+        
+        self.logger.info("Soft stop completed. Files left intact for resume.")
+        sys.exit(0)
+
+    def _remove_log_files(self):
+        """Remove all log files from the state directory."""
+        if os.path.exists(self.state_manager.state_dir):
+            import shutil
+            shutil.rmtree(self.state_manager.state_dir)
+            self.logger.info(f"Removed log directory: {self.state_manager.state_dir}")
+
+    def start(self):
         # Create job lock
         job_lock = BlazeLock(
             name=self.name,
@@ -70,8 +242,40 @@ class Blaze:
             is_stopped=self.is_stopped,
             last_updated=datetime.now(),
         )
+        # Check for existing state and resume if found
+        if self._check_existing_state():
+            existing_lock = self.read_and_verify_lock(job_lock)
+            if existing_lock:
+                self.name = existing_lock.name
+                job_lock.name = self.name
+                
+                if existing_lock.is_paused:
+                    self.logger.info("Resuming from paused state...")
+                elif existing_lock.is_stopped:
+                    self.logger.info("Previous session was stopped. Starting fresh...")
+                else:
+                    self.logger.info("Resuming from previous session...")
+        
+        # Always set to running when starting/resuming
+        self.is_running = True
+        self.is_paused = False
+        self.is_stopped = False
+        
+        # Update job_lock with current running state
+        job_lock.is_running = True
+        job_lock.is_paused = False
+        job_lock.is_stopped = False
+        job_lock.last_updated = datetime.now()
+        
+        # Save updated lock state to local file
         with open(self.job_lock_path, "w") as f:
             json.dump(job_lock.model_dump(mode='json'), f)
+        
+        # Also save to MongoDB if available
+        if self.mongo_client:
+            self.mongo_client.create_lock(job_lock)
+            
+        self.logger.info(f"Scheduler {self.name} is now running (PID: {os.getpid()})")
 
         self.scheduler_loop()
 
@@ -109,14 +313,20 @@ class Blaze:
                         return job_file.submitted_jobs  
         return []
 
-    def read_and_verify_lock(self) -> BlazeLock:
+    def read_and_verify_lock(self, job_lock = None) -> BlazeLock:
         if os.path.exists(self.job_lock_path):
             with open(self.job_lock_path, "r") as f:
                 data = f.read()
                 json_data = json.loads(data)
                 lock_data = BlazeLock(**json_data)
                 if lock_data.name != self.name:
-                    raise ValueError(f"Scheduler name mismatch: {lock_data.name} != {self.name}")
+                    if job_lock:
+                        if lock_data.sequences == job_lock.sequences and lock_data.blocks == job_lock.blocks and lock_data.loop_interval == job_lock.loop_interval:
+                            self.name = lock_data.name 
+                        else:
+                            raise ValueError(f"Scheduler (Sequence, block & loop interval) mismatch: {lock_data.name} != {self.name}")
+                    else:
+                        self.name = lock_data.name 
                 if lock_data.is_paused:
                     self.stop(shutdown=False)
                 if lock_data.is_stopped:
@@ -183,11 +393,11 @@ class Blaze:
                 execution_time=execution_time
             )
             
-            self.logger.info(f"Run {job_state.seq_id}/{job_state.job_id} - success in {execution_time:.2f} seconds")
+            self.logger.info(f"Run {job_state.seq_id}/{job_state.job_id} - success in {execution_time:.2f} seconds", job_id=job_state.job_id)
             return result
         except Exception as e:
             error_msg = str(e)
-            self.logger.error(f"Failed to execute sequence {job_state.seq_id}: {error_msg}")
+            self.logger.error(f"Failed to execute sequence {job_state.seq_id}: {error_msg}", job_id=job_state.job_id)
             
             # Record failed execution in state manager
             self.state_manager.record_execution(
@@ -212,7 +422,7 @@ class Blaze:
         try:
             self.execute(job)
         except Exception as e:
-            self.logger.error(f"Error executing job {job.job_id }: {str(e)}")
+            self.logger.error(f"Error executing job {job.job_id }: {str(e)}", job_id=job.job_id)
             
         # Update next run time after execution
         self.state_manager.update_next_run(job.job_id)
@@ -238,7 +448,7 @@ class Blaze:
             ))
             
     def scheduler_loop(self):
-        while self.is_running:
+        while self.is_running and not self.shutdown_requested:
             self.read_and_verify_lock()
             self.state_manager.print_state(self.loop_interval, self.name, os.getpid())
             
@@ -270,6 +480,6 @@ class Blaze:
                     try:
                         future.result()  # This will raise any exception that occurred
                     except Exception as e:
-                        self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}")
+                        self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}", job_id=job.job_id)
             
             time.sleep(self.loop_interval)

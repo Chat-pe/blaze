@@ -1,9 +1,13 @@
+import sys
+import os
+
+# Add the parent directory to Python path so we can import src
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from datetime import datetime, timedelta
 import time
 import random
 import signal
-import sys
-import os
 import json
 from src.core.block import BlazeBlock
 from src.core.seq import BlazeSequence
