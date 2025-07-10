@@ -343,10 +343,9 @@ class BlazeMongoClient:
         """
         try:
             lock_data = lock.model_dump(mode='json')
-            self.locks_collection.replace_one(
-                {"name": lock.name},
-                lock_data,
-                upsert=True
+            self.locks_collection.delete_many({})
+            self.locks_collection.insert_one(
+                lock_data
             )
             return True
         except Exception as e:
