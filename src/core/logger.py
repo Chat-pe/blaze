@@ -1,3 +1,4 @@
+import sys
 import os
 from datetime import datetime
 from pathlib import Path
@@ -5,7 +6,10 @@ from loguru import logger as loguru_logger
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.db.mongo import BlazeMongoClient
+    try:
+        from ..db.mongo import BlazeMongoClient
+    except ImportError:
+        BlazeMongoClient = None
 
 
 class BlazeLogger:

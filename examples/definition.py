@@ -9,9 +9,9 @@ import time
 import random
 import signal
 import json
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core._types import SeqBlockData
+from ..src.core.block import BlazeBlock
+from ..src.core.seq import BlazeSequence
+from ..src.core._types import SeqBlockData
 
 # Create a block manager
 blocks = BlazeBlock()

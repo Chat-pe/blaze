@@ -1,11 +1,10 @@
-from src.core import Blaze
-from src.core import BlazeLogger
-from src.core import BlazeBlock
-from src.core import BlazeSequence
-from src.core import SubmitSequenceData
-from src.core import BlazeJobs
-from src.core import BlazeLock
-from src.db.mongo import BlazeMongoClient
+from ..core import Blaze
+from ..core import BlazeLogger
+from ..core import BlazeBlock
+from ..core import BlazeSequence
+from ..core import SubmitSequenceData
+from ..core import BlazeJobs
+from ..core import BlazeLock
 
 from typing import List, Dict, Any
 import json

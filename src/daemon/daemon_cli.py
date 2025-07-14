@@ -14,7 +14,7 @@ from typing import List, Optional
 from datetime import datetime
 
 # Import the manager functions
-from src.daemon.manager import (
+from .manager import (
     get_scheduler,
     get_or_create_scheduler,
     start_scheduler,
@@ -25,7 +25,7 @@ from src.daemon.manager import (
 )
 
 # Import core types
-from src.core import (
+from ..core import (
     BlazeBlock,
     BlazeSequence,
     SubmitSequenceData,

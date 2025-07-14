@@ -4,16 +4,16 @@ Provides access to all core, daemon, and web-api components
 """
 
 # Core module exports
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core.blaze import Blaze
-from src.core.logger import BlazeLogger
-from src.core.jobs import BlazeJobs
-from src.core.state import BlazeState
-from src.core.namegen import generate_scheduler_name
+from .core.block import BlazeBlock
+from .core.seq import BlazeSequence
+from .core.blaze import Blaze
+from .core.logger import BlazeLogger
+from .core.jobs import BlazeJobs
+from .core.state import BlazeState
+from .core.namegen import generate_scheduler_name
 
 # Core type definitions
-from src.core._types import (
+from .core._types import (
     BlockData,
     SeqBlockData,
     SeqData,
@@ -29,14 +29,14 @@ from src.core._types import (
 )
 
 # Daemon module exports
-from src.daemon.manager import (
+from .daemon.manager import (
     get_scheduler,
     get_or_create_scheduler,
     start_scheduler,
     stop_scheduler,
     update_jobs
 )
-from src.daemon.daemon_cli import DaemonCLI
+from .daemon.daemon_cli import DaemonCLI
 
 # Web API module exports
 try:

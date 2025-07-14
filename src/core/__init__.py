@@ -3,20 +3,24 @@ Blaze core module exports
 """
 
 # Export main classes
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core.blaze import Blaze
-from src.core.logger import BlazeLogger
-from src.core.jobs import BlazeJobs
+from .block import BlazeBlock
+from .seq import BlazeSequence
+from .blaze import Blaze
+from .logger import BlazeLogger
+from .jobs import BlazeJobs
 # Export type definitions
-from src.core._types import (
+from ._types import (
     BlockData,
     SeqBlockData,
     SeqData,
+    SubmitSequenceData,
+    SequenceExecutionData,
     SequenceStatus,
     SequenceResult,
-    SequenceExecutionData,
-    SubmitSequenceData,
+    JobFile,
+    JobExecutuionData,
+    JobState,
+    SequenceData,
     BlazeLock
 )
 

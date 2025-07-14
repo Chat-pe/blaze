@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import json
 
-from src.core._types import (
+from ..core._types import (
     JobFile, 
     JobState, 
     BlazeLock, 

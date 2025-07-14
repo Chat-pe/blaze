@@ -5,11 +5,14 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 import croniter
 from pathlib import Path
-from src.core._types import SubmitSequenceData, SequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState, JobState
+from ._types import SubmitSequenceData, SequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState, JobState
 from tabulate import tabulate
 
 if TYPE_CHECKING:
-    from src.db.mongo import BlazeMongoClient
+    try:
+        from ..db.mongo import BlazeMongoClient
+    except ImportError:
+        BlazeMongoClient = None
 
 class BlazeState:
     """

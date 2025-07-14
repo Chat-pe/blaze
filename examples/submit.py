@@ -1,6 +1,6 @@
 
-from src.core import SubmitSequenceData
-from src.daemon.manager import update_jobs
+from ..src.core import SubmitSequenceData
+from ..src.daemon.manager import update_jobs
 
 
 job = update_jobs(submitted_jobs = [SubmitSequenceData(

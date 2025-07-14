@@ -1,16 +1,19 @@
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core.namegen import generate_scheduler_name
-from src.core._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
+from .block import BlazeBlock
+from .seq import BlazeSequence
+from .namegen import generate_scheduler_name
+from ._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
 from typing import List, Dict, Any, Optional
 import os, multiprocessing, json, time, logging, hashlib, signal, sys
 from datetime import datetime
 import croniter
-from src.core.logger import BlazeLogger
-from src.core.state import BlazeState
+from .logger import BlazeLogger
+from .state import BlazeState
 from tabulate import tabulate
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.db.mongo import BlazeMongoClient
+try:
+    from ..db.mongo import BlazeMongoClient
+except ImportError:
+    BlazeMongoClient = None
 
 class Blaze:
 
@@ -47,7 +50,7 @@ class Blaze:
         
         # Initialize MongoDB client if URI is provided
         self.mongo_client = None
-        if mongo_uri:
+        if mongo_uri and BlazeMongoClient is not None:
             try:
                 self.mongo_client = BlazeMongoClient(mongo_uri)
                 if self.mongo_client.test_connection():
@@ -60,6 +63,8 @@ class Blaze:
             except Exception as e:
                 self.logger.error(f"Failed to initialize MongoDB client: {str(e)}")
                 self.mongo_client = None
+        elif mongo_uri and BlazeMongoClient is None:
+            self.logger.warning("MongoDB client not available, continuing without MongoDB backup")
         
         # Initialize state manager with mongo client
         self.state_manager = BlazeState(state_dir=state_dir, mongo_client=self.mongo_client)
