@@ -3,9 +3,9 @@ import time
 from pydantic import BaseModel
 from datetime import datetime
 
-from src.core.block import BlazeBlock
-from src.core._types import SeqData, SeqBlockData, SequenceExecutionData
-from src.core.logger import BlazeLogger
+from .block import BlazeBlock
+from ._types import SeqData, SeqBlockData, SequenceExecutionData
+from .logger import BlazeLogger
 
 T = TypeVar('T')
 

@@ -1,12 +1,15 @@
-from src.core.logger import BlazeLogger
-from src.core._types import SubmitSequenceData, JobFile, BlazeLock
+from .logger import BlazeLogger
+from ._types import SubmitSequenceData, JobFile, BlazeLock
 from typing import List, Optional, TYPE_CHECKING
 import os
 import json
 from datetime import datetime
 
 if TYPE_CHECKING:
-    from src.db.mongo import BlazeMongoClient
+    try:
+        from ..db.mongo import BlazeMongoClient
+    except ImportError:
+        BlazeMongoClient = None
 
 class BlazeJobs:
 
