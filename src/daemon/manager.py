@@ -1,3 +1,4 @@
+from blaze.src.db.mongo import BlazeMongoClient
 from ..core import Blaze
 from ..core import BlazeLogger
 from ..core import BlazeBlock
