@@ -5,10 +5,10 @@ from ..src.daemon.manager import update_jobs
 
 job = update_jobs(submitted_jobs = [SubmitSequenceData(
     seq_id="math_pipeline_1",
-    seq_run_interval="*/2 * * * *",
+    seq_run_interval="*/1 * * * *",
     parameters={
         "generate_numbers": {
-            "count": 3,
+            "count": 4,
             "min_val": 180,
             "max_val": 280
         },
