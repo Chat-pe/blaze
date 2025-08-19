@@ -148,6 +148,9 @@ class BlazeState:
             next_run_human = seconds_to_human_readable(next_run)
             data.append([job.job_id[:3]+"..."+job.job_id[-5:], job.seq_id, job.last_run.strftime('%D %H:%M:%S') if job.last_run else "N/A", f"{job.next_run.strftime('%D %H:%M:%S')} <({next_run_human})", job.run_state, f"{job.total_execution_time:.4f}s", job.total_runs, f"{job.total_execution_time/job.total_runs:.4f}s" if job.total_runs > 0 else "N/A"])
         statement3 = tabulate(data, headers=headers, tablefmt="grid")
+        # Clear screen and move cursor to top
+        print("\033[2J\033[H", end="")
+        print(f"{statement1}\n{statement2}\n{statement3}\n")
 
 
     
