@@ -7,6 +7,8 @@ import croniter
 from pathlib import Path
 from ._types import SubmitSequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState
 from tabulate import tabulate
+import pandas as pd
+import numpy as np
 
 if TYPE_CHECKING:
     from src.db.mongo import BlazeMongoClient
@@ -42,10 +44,7 @@ class BlazeState:
         return seq_dir
     
     def _clean_nat_values(self, obj):
-        """Clean NaN and NaT values from objects for serialization."""
-        import pandas as pd
-        import numpy as np
-        
+
         if obj is None:
             return None
         elif isinstance(obj, (np.ndarray, pd.Series)):
@@ -68,10 +67,6 @@ class BlazeState:
             return obj
     
     def _clean_for_json(self, obj):
-        """Recursively clean an object to make it JSON serializable."""
-        import pandas as pd
-        import numpy as np
-        from datetime import datetime
         
         if obj is None:
             return None
@@ -118,14 +113,6 @@ class BlazeState:
         return self.job_states.get(job_id)
     
     def print_state(self, loop_interval: int, blaze_name: str, pid: int):
-        """
-        Print the state of all jobs.
-
-        First print how many jobs are in the state
-        Then the time state will be next updated loop_interval + time now
-        then a table with job seq id, last run(Parsed into date and time), next run(like <12m), status
-        the whole thing should rewrite the screen
-        """
 
         def seconds_to_human_readable(total_seconds):
             """
@@ -161,9 +148,6 @@ class BlazeState:
             next_run_human = seconds_to_human_readable(next_run)
             data.append([job.job_id[:3]+"..."+job.job_id[-5:], job.seq_id, job.last_run.strftime('%D %H:%M:%S') if job.last_run else "N/A", f"{job.next_run.strftime('%D %H:%M:%S')} <({next_run_human})", job.run_state, f"{job.total_execution_time:.4f}s", job.total_runs, f"{job.total_execution_time/job.total_runs:.4f}s" if job.total_runs > 0 else "N/A"])
         statement3 = tabulate(data, headers=headers, tablefmt="grid")
-        # Clear screen and move cursor to top
-        print("\033[2J\033[H", end="")
-        print(f"{statement1}\n{statement2}\n{statement3}\n")
 
 
     
@@ -278,19 +262,8 @@ class BlazeState:
     def record_execution(self, job_id: str, seq_id: str, execution_result: Dict[str, Any], 
                          status: SequenceStatus, execution_time: float, 
                          error: Optional[str] = None) -> JobState:
-        """
-        Record the execution of a sequence.
-        
-        Args:
-            seq_id (str): Sequence ID
-            execution_result (Dict[str, Any]): The result of the execution
-            status (SequenceStatus): The status of the execution
-            execution_time (float): The time taken for execution in seconds
-            error (Optional[str]): Error message if the execution failed
-        """
         try:
             now = datetime.now()
-            print(f"DEBUG: record_execution started for job_id: {job_id}")
             
             if job_id not in self.job_states:
                 raise ValueError(f"Sequence {job_id} not found")
@@ -350,8 +323,8 @@ class BlazeState:
                 if job_data.error_logs is not None:
                     job_data.error_logs = self._clean_nat_values(job_data.error_logs)
                     
-            except Exception as cleaning_error:
-                print(f"DEBUG: Error during data cleaning: {cleaning_error}")
+            except Exception as e:
+                raise e
             
             try:
                 job_dict = job_data.model_dump()
@@ -367,7 +340,6 @@ class BlazeState:
                         try:
                             if hasattr(job_data, field_name):
                                 field_info = job_data.model_fields.get(field_name, None)
-                                print(f"DEBUG: Field {field_name}: {type(field_value)} = {field_value} (field_info: {field_info})")
                         except Exception as field_error:
                             print(f"DEBUG: Error inspecting field {field_name}: {field_error}")
                 except Exception as inspect_error:
@@ -393,10 +365,8 @@ class BlazeState:
                         'start_date': job_data.start_date.isoformat() if job_data.start_date else None,
                         'end_date': job_data.end_date.isoformat() if job_data.end_date else None,
                     }
-                    print(f"DEBUG: Manual serialization successful, using manual dict")
                     job_dict = manual_dict
-                except Exception as manual_error:
-                    print(f"DEBUG: Manual serialization also failed: {manual_error}")
+                except Exception as e:
                     raise e
             json.dump(job_dict, f, indent=2)
         

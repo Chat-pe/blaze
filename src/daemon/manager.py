@@ -163,13 +163,6 @@ def get_all_jobs_status() -> Dict[str, Any]:
 
 
 def get_blaze_scheduler_jobs_status() -> Dict[str, Any]:
-    """
-    Get status of all jobs directly from the running Blaze scheduler instance.
-    This gets the actual job states from memory, ensuring job IDs match the scheduler display.
-    
-    Returns:
-        Dict[str, Any]: JSON object with job status information and metadata
-    """
     try:
         # First try to get jobs from the running scheduler instance
         if _scheduler and hasattr(_scheduler, 'state_manager'):
@@ -266,7 +259,6 @@ def get_blaze_scheduler_jobs_status() -> Dict[str, Any]:
         
         # Second fallback: Try to read from local state files
         try:
-            from ..core.state import BlazeState
             
             # Try to read from the log directory where job states are actually stored
             log_dir = "log"  # Job states are stored in the log/ directory
