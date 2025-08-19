@@ -5,14 +5,11 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 import croniter
 from pathlib import Path
-from ._types import SubmitSequenceData, SequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState, JobState
+from ._types import SubmitSequenceData, JobExecutuionData, SequenceResult, SequenceStatus, JobState
 from tabulate import tabulate
 
 if TYPE_CHECKING:
-    try:
-        from ..db.mongo import BlazeMongoClient
-    except ImportError:
-        BlazeMongoClient = None
+    from src.db.mongo import BlazeMongoClient
 
 class BlazeState:
     """
@@ -44,15 +41,79 @@ class BlazeState:
         Path(seq_dir).mkdir(parents=True, exist_ok=True)
         return seq_dir
     
-    def get_sequence_state(self, job_id: str) -> Optional[SequenceData]:
+    def _clean_nat_values(self, obj):
+        """Clean NaN and NaT values from objects for serialization."""
+        import pandas as pd
+        import numpy as np
+        
+        if obj is None:
+            return None
+        elif isinstance(obj, (np.ndarray, pd.Series)):
+            if len(obj) == 0:
+                return []
+            elif len(obj) == 1:
+                return self._clean_nat_values(obj[0])
+            else:
+                # Convert to list and clean each element
+                return [self._clean_nat_values(item) for item in obj.tolist()]
+        elif isinstance(obj, dict):
+            return {k: self._clean_nat_values(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_nat_values(item) for item in obj]
+        elif pd.isna(obj) or (hasattr(pd, 'NaT') and obj is pd.NaT):
+            return None
+        elif hasattr(obj, '__class__') and 'NaTType' in str(obj.__class__):
+            return None
+        else:
+            return obj
+    
+    def _clean_for_json(self, obj):
+        """Recursively clean an object to make it JSON serializable."""
+        import pandas as pd
+        import numpy as np
+        from datetime import datetime
+        
+        if obj is None:
+            return None
+        elif isinstance(obj, (np.ndarray, pd.Series)):
+            # Handle numpy arrays and pandas Series
+            if len(obj) == 0:
+                return []
+            elif len(obj) == 1:
+                return self._clean_for_json(obj[0])
+            else:
+                # Convert to list and clean each element
+                return [self._clean_for_json(item) for item in obj.tolist()]
+        elif isinstance(obj, dict):
+            return {k: self._clean_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_for_json(item) for item in obj]
+        elif pd.isna(obj) or (hasattr(pd, 'NaT') and obj is pd.NaT):
+            return None
+        elif isinstance(obj, (pd.NaTType, type(pd.NaT))):
+            return None
+        elif hasattr(obj, '__class__') and 'NaTType' in str(obj.__class__):
+            return None
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, (np.integer, int)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, float)):
+            return float(obj)
+        elif hasattr(obj, 'isoformat'):  # datetime-like objects
+            return obj.isoformat()
+        else:
+            return obj
+    
+    def get_sequence_state(self, job_id: str) -> Optional[JobState]:
         """
         Get the current state for a sequence.
         
         Args:
-            seq_id (str): Sequence ID
+            job_id (str): Job ID
             
         Returns:
-            Optional[SequenceData]: The sequence state if it exists, None otherwise
+            Optional[JobState]: The job state if it exists, None otherwise
         """
         return self.job_states.get(job_id)
     
@@ -106,7 +167,7 @@ class BlazeState:
 
 
     
-    def add_job(self, job: JobState) -> SequenceData:
+    def add_job(self, job: JobState) -> JobState:
         """
         Add a new job to the state or update an existing one.
         
@@ -114,7 +175,7 @@ class BlazeState:
             job (JobState): The job data
             
         Returns:
-            SequenceData: The updated sequence state
+            JobState: The updated job state
         """
         try:
             if not job.job_id in self.job_states.keys():
@@ -136,7 +197,10 @@ class BlazeState:
                     latest_result=None,
                     error_logs=[],
                     total_execution_time=0.0,
-                    total_runs=0
+                    total_runs=int(0),
+                    retries=0,
+                    retry_delay=0,
+                    seq_run_timeout=300
                 )
 
             self.job_states[job.job_id] = job
@@ -163,7 +227,6 @@ class BlazeState:
         base_time = datetime.now()
         
         if seq_data.end_date and base_time > seq_data.end_date:
-            # Job has expired
             return None
             
         cron_iter = croniter.croniter(seq_data.seq_run_interval, base_time)
@@ -171,17 +234,36 @@ class BlazeState:
         
         if update_time:
             seq_data.next_run = next_run
+            # Ensure data types are clean before saving
+            seq_data.total_runs = int(seq_data.total_runs)
+            seq_data.total_execution_time = float(seq_data.total_execution_time)
+            seq_data.retries = int(seq_data.retries)
+            seq_data.retry_delay = int(seq_data.retry_delay)
+            seq_data.seq_run_timeout = int(seq_data.seq_run_timeout)
             self._save_job_state(job_id)
             
         return next_run
     
-    def get_due_jobs(self) -> List[JobState]:
-        """
-        Get all jobs that are due to run now.
+    def _update_next_run_without_save(self, job_id: str) -> Optional[datetime]:
+        if job_id not in self.job_states:
+            raise ValueError(f"Sequence {job_id} not found")
+            
+        seq_data = self.job_states[job_id]
+        base_time = datetime.now()
         
-        Returns:
-            List[JobState]: List of jobs due to run
-        """
+        if seq_data.end_date and base_time > seq_data.end_date:
+            # Job has expired
+            return None
+            
+        cron_iter = croniter.croniter(seq_data.seq_run_interval, base_time)
+        next_run = cron_iter.get_next(datetime)
+        
+        # Just update the next_run time without saving
+        seq_data.next_run = next_run
+        
+        return next_run
+    
+    def get_due_jobs(self) -> List[JobState]:
         now = datetime.now()
         due_jobs = []
         
@@ -208,6 +290,7 @@ class BlazeState:
         """
         try:
             now = datetime.now()
+            print(f"DEBUG: record_execution started for job_id: {job_id}")
             
             if job_id not in self.job_states:
                 raise ValueError(f"Sequence {job_id} not found")
@@ -215,55 +298,106 @@ class BlazeState:
                 
             job_data = self.job_states[job_id]
             job_data.run_state = status
-            job_data.last_run = now     
             job_data.latest_result = execution_result
             job_data.total_execution_time += execution_time
-            job_data.total_runs += 1
+            current_runs = job_data.total_runs if job_data.total_runs is not None else 0
+            job_data.total_runs = int(current_runs) + 1
 
             if error:
                 if not job_data.error_logs:
                     job_data.error_logs = []    
                 job_data.error_logs.append(f"{now.isoformat()}: {error}")
                 
-            # Update next run time
-            self.update_next_run(job_id)
+            if execution_time < 0:
+                execution_time = 0.0
+            elif execution_time > 86400:  
+                execution_time = 86400.0
+                
+            start_time = now - timedelta(seconds=int(execution_time))
+            job_data.last_run = start_time
             
-            # Calculate start time
-            job_data.last_run = now - timedelta(seconds=execution_time)
-            
-            # Create execution record
             job_data.next_run = now
             
-            # Save to sequence log file
+            self._update_next_run_without_save(job_id)
+            
             self._append_execution_record(job_id, {
-                "status": status,
+                "status": status.value if hasattr(status, "value") else str(status),
                 "job_id": job_id,
                 "start_time": job_data.last_run.isoformat() if job_data.last_run else None,
                 "execution_time": execution_time,
                 "error": error
             })
             
-            # Save updated state
             self._save_job_state(job_id)
             return job_data
         except Exception as e:
-            print(f"Error recording execution: {str(e)}")
             raise e
+            
     
     def _save_job_state(self, job_id: str):
-        """
-        Save the state of a sequence to disk.
-        
-        Args:
-            seq_id (str): Sequence ID
-        """
         job_dir = self._ensure_sequence_directory(job_id)
         state_file = os.path.join(job_dir, "state.json")
         
         with open(state_file, "w") as f:
-            # Convert SequenceData to dict for serialization
             job_data = self.job_states[job_id]
-            job_dict = job_data.model_dump(mode='json')
+           
+            try:
+               
+                if job_data.latest_result is not None:
+                    job_data.latest_result = self._clean_nat_values(job_data.latest_result)
+                if job_data.parameters is not None:
+                    job_data.parameters = self._clean_nat_values(job_data.parameters)
+                if job_data.error_logs is not None:
+                    job_data.error_logs = self._clean_nat_values(job_data.error_logs)
+                    
+            except Exception as cleaning_error:
+                print(f"DEBUG: Error during data cleaning: {cleaning_error}")
+            
+            try:
+                job_dict = job_data.model_dump()
+                
+                # Then try with mode='json'
+                job_dict_json = job_data.model_dump(mode='json')
+                job_dict = job_dict_json
+                
+            except Exception as e:
+                try:
+                    # Try to serialize each field individually
+                    for field_name, field_value in job_data.__dict__.items():
+                        try:
+                            if hasattr(job_data, field_name):
+                                field_info = job_data.model_fields.get(field_name, None)
+                                print(f"DEBUG: Field {field_name}: {type(field_value)} = {field_value} (field_info: {field_info})")
+                        except Exception as field_error:
+                            print(f"DEBUG: Error inspecting field {field_name}: {field_error}")
+                except Exception as inspect_error:
+                    print(f"DEBUG: Error during field inspection: {inspect_error}")
+                
+                try:
+                    
+                    manual_dict = {
+                        'job_id': job_data.job_id,
+                        'seq_id': job_data.seq_id,
+                        'total_runs': int(job_data.total_runs) if job_data.total_runs is not None else 0,
+                        'total_execution_time': float(job_data.total_execution_time) if job_data.total_execution_time is not None else 0.0,
+                        'retries': int(job_data.retries) if job_data.retries is not None else 0,
+                        'retry_delay': int(job_data.retry_delay) if job_data.retry_delay is not None else 0,
+                        'seq_run_timeout': int(job_data.seq_run_timeout) if job_data.seq_run_timeout is not None else 300,
+                        'run_state': job_data.run_state.value if hasattr(job_data.run_state, 'value') else str(job_data.run_state),
+                        'last_run': job_data.last_run.isoformat() if job_data.last_run else None,
+                        'next_run': job_data.next_run.isoformat() if job_data.next_run else None,
+                        'latest_result': self._clean_for_json(job_data.latest_result),
+                        'error_logs': self._clean_for_json(job_data.error_logs),
+                        'parameters': self._clean_for_json(job_data.parameters),
+                        'seq_run_interval': job_data.seq_run_interval,
+                        'start_date': job_data.start_date.isoformat() if job_data.start_date else None,
+                        'end_date': job_data.end_date.isoformat() if job_data.end_date else None,
+                    }
+                    print(f"DEBUG: Manual serialization successful, using manual dict")
+                    job_dict = manual_dict
+                except Exception as manual_error:
+                    print(f"DEBUG: Manual serialization also failed: {manual_error}")
+                    raise e
             json.dump(job_dict, f, indent=2)
         
         # Also save to MongoDB if available

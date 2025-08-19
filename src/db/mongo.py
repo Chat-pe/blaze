@@ -20,15 +20,29 @@ class BlazeMongoClient:
     Provides backup and persistence for jobs, job states, execution logs, and system locks.
     """
     
-    def __init__(self, connection_string: str, database_name: str = "blaze_db"):
+    def __init__(self, connection_string: str, database_name: str = "blaze_db", ssl_options: Optional[Dict[str, Any]] = None):
         """
         Initialize MongoDB client with connection string.
         
         Args:
             connection_string (str): MongoDB connection string
             database_name (str): Name of the database to use (default: blaze_db)
+            ssl_options (Optional[Dict[str, Any]]): SSL configuration options for the connection
         """
-        self.client = MongoClient(connection_string)
+        # Default SSL options for MongoDB Atlas
+        default_ssl_options = {
+            'ssl': True,
+            'ssl_cert_reqs': 'CERT_NONE',  # For development - use CERT_REQUIRED in production
+            'tlsAllowInvalidCertificates': True,  # For development - remove in production
+            'tlsAllowInvalidHostnames': True,  # For development - remove in production
+        }
+        
+        # Merge provided SSL options with defaults
+        if ssl_options:
+            default_ssl_options.update(ssl_options)
+        
+        # Create MongoClient with SSL options
+        self.client = MongoClient(connection_string, **default_ssl_options)
         self.db: Database = self.client[database_name]
         
         # Collections corresponding to local storage structure
@@ -591,6 +605,40 @@ class BlazeMongoClient:
 
     # === UTILITY METHODS ===
     
+    def get_connection_info(self) -> Dict[str, Any]:
+        """
+        Get connection information and status.
+        
+        Returns:
+            Dict[str, Any]: Connection information including host, port, database, and SSL status
+        """
+        try:
+            # Get connection details
+            connection_info = {
+                'host': self.client.address[0] if self.client.address else 'unknown',
+                'port': self.client.address[1] if self.client.address else 'unknown',
+                'database': self.db.name,
+                'ssl_enabled': getattr(self.client, 'ssl', False),
+                'connection_status': 'connected' if self.client.address else 'disconnected'
+            }
+            
+            # Test connection and add status
+            try:
+                self.client.admin.command('ping')
+                connection_info['ping_status'] = 'success'
+                connection_info['connection_healthy'] = True
+            except Exception as e:
+                connection_info['ping_status'] = f'failed: {str(e)}'
+                connection_info['connection_healthy'] = False
+            
+            return connection_info
+            
+        except Exception as e:
+            return {
+                'error': f'Failed to get connection info: {str(e)}',
+                'connection_healthy': False
+            }
+    
     def close(self):
         """Close the MongoDB connection."""
         self.client.close()
@@ -603,10 +651,23 @@ class BlazeMongoClient:
             bool: True if connection is successful, False otherwise
         """
         try:
+            # Test basic connectivity
             self.client.admin.command('ping')
             return True
         except Exception as e:
-            print(f"Connection test failed: {e}")
+            error_msg = str(e)
+            print(f"Connection test failed: {error_msg}")
+            
+            # Provide specific guidance for common SSL issues
+            if "CERTIFICATE_VERIFY_FAILED" in error_msg:
+                print("SSL Certificate verification failed. This is common with MongoDB Atlas.")
+                print("The client is configured with relaxed SSL settings for development.")
+                print("For production, ensure proper SSL certificates are configured.")
+            elif "SSL" in error_msg:
+                print("SSL connection issue detected. Check SSL configuration.")
+            elif "timeout" in error_msg.lower():
+                print("Connection timeout. Check network connectivity and firewall settings.")
+            
             return False
     
     def get_collection_stats(self) -> Dict[str, int]:
