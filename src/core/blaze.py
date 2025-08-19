@@ -1,9 +1,9 @@
-from src.core.block import BlazeBlock
-from src.core.seq import BlazeSequence
-from src.core.namegen import generate_scheduler_name
-from src.core._types import SubmitSequenceData, JobFile, BlazeLock, SequenceStatus, JobState
-from typing import List, Optional
-import os, multiprocessing, json, time, hashlib, signal, sys
+from .block import BlazeBlock
+from .seq import BlazeSequence
+from .namegen import generate_scheduler_name
+from ._types import SubmitSequenceData, JobFile, JobExecutuionData, BlazeLock, SequenceStatus, JobState
+from typing import List, Dict, Any, Optional
+import os, multiprocessing, json, time, logging, hashlib, signal, sys
 from datetime import datetime
 import croniter
 from .jobs import BlazeJobs
@@ -55,7 +55,6 @@ class Blaze:
                 # SSL configuration for MongoDB Atlas
                 ssl_options = {
                     'ssl': True,
-                    'ssl_cert_reqs': 'CERT_NONE',  # For development - use CERT_REQUIRED in production
                     'tlsAllowInvalidCertificates': True,  # For development - remove in production
                     'tlsAllowInvalidHostnames': True,  # For development - remove in production
                 }
@@ -72,14 +71,8 @@ class Blaze:
                 self.logger.error(f"Failed to initialize MongoDB client: {str(e)}")
                 self.mongo_client = None
         
+        # Initialize state manager with mongo client
         self.state_manager = BlazeState(state_dir=state_dir, mongo_client=self.mongo_client)
-        self.sync = BlazeSync(
-            mongo_client=self.mongo_client,
-            state_manager=self.state_manager,
-            job_file_path=self.job_file_path,
-            job_lock_path=self.job_lock_path,
-            logger=self.logger,
-        )
 
 
         self.logger.info(f"Blaze {self.name} initialized")
@@ -132,32 +125,85 @@ class Blaze:
                 self.logger.info("Force shutdown requested. Exiting immediately.")
                 sys.exit(1)
 
-    def _check_existing_state(self, intended_lock: Optional[BlazeLock] = None):
-        """Check and reconcile existing state using BlazeSync."""
-        try:
-            resumed = self.sync.reconcile_on_start(self.name, intended_lock=intended_lock)
-            if resumed:
+    def _check_existing_state(self):
+        """Check for existing state on initialization and resume if found."""
+        local_lock_exists = os.path.exists(self.job_lock_path)
+        mongo_lock_exists = False
+        
+        if self.mongo_client:
+            mongo_lock = self.mongo_client.fetch_lock(self.name)
+            mongo_lock_exists = mongo_lock is not None
+        
+        # If both exist, verify they match
+        if local_lock_exists and mongo_lock_exists:
+            local_lock = self.read_and_verify_lock()
+            mongo_lock = self.mongo_client.fetch_lock(self.name)
+            
+            if local_lock and mongo_lock:
+                if local_lock.last_updated != mongo_lock.last_updated:
+                    self.logger.warning("State mismatch detected between local and MongoDB. Using most recent...")
+                    if local_lock.last_updated > mongo_lock.last_updated:
+                        self.mongo_client.create_lock(local_lock)
+                    else:
+                        self._restore_from_mongo_lock(mongo_lock)
                 self.logger.info("Resuming from existing state...")
-            return resumed
-        except Exception as e:
-            self.logger.warning(f"Failed to reconcile state on start: {e}")
-            return False
+                return True
+        
+        # If only local exists, sync to MongoDB
+        elif local_lock_exists and not mongo_lock_exists:
+            if self.mongo_client:
+                local_lock = self.read_and_verify_lock()
+                if local_lock:
+                    self.mongo_client.create_lock(local_lock)
+                    self.logger.info("Synced local state to MongoDB...")
+            self.logger.info("Resuming from local state...")
+            return True
+        
+        # If only MongoDB exists, restore to local
+        elif not local_lock_exists and mongo_lock_exists:
+            mongo_lock = self.mongo_client.fetch_lock(self.name)
+            if mongo_lock:
+                self._restore_from_mongo_lock(mongo_lock)
+                self.logger.info("Restored state from MongoDB...")
+                return True
+        
+        return False
 
     def _restore_from_mongo_lock(self, mongo_lock: BlazeLock):
-        """Deprecated: Kept for compatibility; state restore handled by BlazeSync."""
-        with open(self.job_lock_path, "w", encoding="utf-8") as f:
+        """Restore local state from MongoDB lock."""
+        with open(self.job_lock_path, "w") as f:
             json.dump(mongo_lock.model_dump(mode='json'), f)
+        
+        # Also restore job states if they exist in MongoDB
+        if self.mongo_client:
+            job_states = self.mongo_client.fetch_all_job_states()
+            for job_state in job_states:
+                self.state_manager.job_states[job_state.job_id] = job_state
+                self.state_manager._save_job_state(job_state.job_id)
 
     def hard_stop(self):
         """Perform hard stop: delete all files and clear MongoDB."""
         self.is_running = False
         self.is_stopped = True
         
-        # Synchronous cleanup across local and Mongo
-        try:
-            self.sync.hard_stop_cleanup(self.name)
-        except Exception as e:
-            self.logger.warning(f"Hard stop cleanup encountered issues: {e}")
+        # Delete local files
+        self.remove_lock()
+        self.remove_jobs()
+        self._remove_log_files()
+        
+        # Clear MongoDB if available
+        if self.mongo_client:
+            self.mongo_client.delete_lock(self.name)
+            self.mongo_client.delete_job_file(self.name)
+            
+            # Delete all job states and their runs
+            job_states = self.mongo_client.fetch_all_job_states()
+            for job_state in job_states:
+                self.mongo_client.delete_job_state(job_state.job_id)
+                self.mongo_client.delete_job_runs(job_state.job_id)
+            
+            # Delete logs for this scheduler
+            self.mongo_client.delete_logs()
         
         self.logger.info("Hard stop completed. All data cleared.")
         sys.exit(0)
@@ -209,7 +255,7 @@ class Blaze:
             last_updated=datetime.now(),
         )
         # Check for existing state and resume if found
-        if self._check_existing_state(job_lock):
+        if self._check_existing_state():
             existing_lock = self.read_and_verify_lock(job_lock)
             if existing_lock:
                 self.name = existing_lock.name
@@ -414,11 +460,6 @@ class Blaze:
             self.state_manager.print_state(self.loop_interval, self.name, os.getpid())
             
             # Process submitted jobs from job file
-            # Ensure job file is reconciled with Mongo before reading
-            try:
-                self.sync.reconcile_job_file(self.name)
-            except Exception:
-                pass
             submitted_jobs = self.read_jobs()
             if submitted_jobs:
                 self.validate_jobs(submitted_jobs)
