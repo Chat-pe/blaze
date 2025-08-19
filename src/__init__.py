@@ -24,7 +24,6 @@ from .core._types import (
     JobFile,
     JobExecutuionData,
     JobState,
-    SequenceData,
     BlazeLock
 )
 
@@ -91,7 +90,6 @@ __all__ = [
     'JobFile',
     'JobExecutuionData',
     'JobState',
-    'SequenceData',
     'BlazeLock',
     
     # Daemon functions

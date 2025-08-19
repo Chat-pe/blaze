@@ -6,11 +6,12 @@ from typing import List, Optional
 import os, multiprocessing, json, time, hashlib, signal, sys
 from datetime import datetime
 import croniter
-from src.core.logger import BlazeLogger
-from src.core.state import BlazeState
+from .jobs import BlazeJobs
+from .state import BlazeState
+from .logger import BlazeLogger
+from tabulate import tabulate
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.db.mongo import BlazeMongoClient
-from src.core.sync import BlazeSync
+from ..db.mongo import BlazeMongoClient
 
 class Blaze:
 
@@ -49,9 +50,17 @@ class Blaze:
         
         # Initialize MongoDB client if URI is provided
         self.mongo_client = None
-        if mongo_uri and BlazeMongoClient is not None:
+        if mongo_uri:
             try:
-                self.mongo_client = BlazeMongoClient(mongo_uri)
+                # SSL configuration for MongoDB Atlas
+                ssl_options = {
+                    'ssl': True,
+                    'ssl_cert_reqs': 'CERT_NONE',  # For development - use CERT_REQUIRED in production
+                    'tlsAllowInvalidCertificates': True,  # For development - remove in production
+                    'tlsAllowInvalidHostnames': True,  # For development - remove in production
+                }
+                
+                self.mongo_client = BlazeMongoClient(mongo_uri, ssl_options=ssl_options)
                 if self.mongo_client.test_connection():
                     self.logger.info("MongoDB connection established successfully")
                     # Pass mongo client to logger
@@ -62,8 +71,6 @@ class Blaze:
             except Exception as e:
                 self.logger.error(f"Failed to initialize MongoDB client: {str(e)}")
                 self.mongo_client = None
-        elif mongo_uri and BlazeMongoClient is None:
-            self.logger.warning("MongoDB client not available, continuing without MongoDB backup")
         
         self.state_manager = BlazeState(state_dir=state_dir, mongo_client=self.mongo_client)
         self.sync = BlazeSync(
@@ -378,12 +385,7 @@ class Blaze:
         Args:
             job (JobState): The job to execute
         """
-        try:
-            self.execute(job)
-        except Exception as e:
-            self.logger.error(f"Error executing job {job.job_id }: {str(e)}", job_id=job.job_id)
-            
-        # Update next run time after execution
+        self.execute(job)
         self.state_manager.update_next_run(job.job_id)
 
     def check_and_add_jobs(self, submitted_jobs: List[SubmitSequenceData]):
@@ -442,8 +444,8 @@ class Blaze:
                 for future in as_completed(future_to_job):
                     job = future_to_job[future]
                     try:
-                        future.result()  # This will raise any exception that occurred
+                        future.result()  
                     except Exception as e:
-                        self.logger.error(f"Job {job.seq_id} failed with error: {str(e)}", job_id=job.job_id)
+                        self.logger.error(f"Unexpected error in job {job.seq_id}: {str(e)}", job_id=job.job_id)
             
             time.sleep(self.loop_interval)

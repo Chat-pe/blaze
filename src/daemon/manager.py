@@ -5,6 +5,7 @@ from ..core import BlazeSequence
 from ..core import SubmitSequenceData
 from ..core import BlazeJobs
 from ..core import BlazeLock
+from ..db.mongo import BlazeMongoClient
 
 from typing import List, Dict, Any
 import json
@@ -92,7 +93,15 @@ def get_all_jobs_status() -> Dict[str, Any]:
         }
     
     try:
-        mongo_client = BlazeMongoClient(_MONGODB_URI)
+        # SSL configuration for MongoDB Atlas
+        ssl_options = {
+            'ssl': True,
+            'ssl_cert_reqs': 'CERT_NONE',  # For development - use CERT_REQUIRED in production
+            'tlsAllowInvalidCertificates': True,  # For development - remove in production
+            'tlsAllowInvalidHostnames': True,  # For development - remove in production
+        }
+        
+        mongo_client = BlazeMongoClient(_MONGODB_URI, ssl_options=ssl_options)
         
         if not mongo_client.test_connection():
             return {
@@ -104,7 +113,6 @@ def get_all_jobs_status() -> Dict[str, Any]:
         
         # Get all job states from MongoDB
         job_states = mongo_client.fetch_all_job_states()
-        
         if not job_states:
             mongo_client.close()
             return {
@@ -126,6 +134,7 @@ def get_all_jobs_status() -> Dict[str, Any]:
             avg_execution_time = (job_state.total_execution_time / job_state.total_runs) if job_state.total_runs > 0 else 0.0
             
             jobs_data.append({
+                "job_id": job_state.job_id, 
                 "seq_id": job_state.seq_id,
                 "last_run": last_run,
                 "next_run": next_run,
@@ -148,6 +157,177 @@ def get_all_jobs_status() -> Dict[str, Any]:
         return {
             "success": False,
             "error": f"Error retrieving job status from MongoDB: {str(e)}",
+            "jobs": [],
+            "total_jobs": 0
+        }
+
+
+def get_blaze_scheduler_jobs_status() -> Dict[str, Any]:
+    try:
+        # First try to get jobs from the running scheduler instance
+        if _scheduler and hasattr(_scheduler, 'state_manager'):
+            # Get job states directly from the scheduler's state manager
+            job_states = _scheduler.state_manager.job_states
+            
+            if job_states:
+                # Prepare job data
+                jobs_data = []
+                
+                for job_id, job_state in job_states.items():
+                    # Format datetime values
+                    last_run = job_state.last_run.isoformat() if job_state.last_run else None
+                    next_run = job_state.next_run.isoformat() if job_state.next_run else None
+                    
+                    # Calculate average execution time
+                    avg_execution_time = (job_state.total_execution_time / job_state.total_runs) if job_state.total_runs > 0 else 0.0
+                    
+                    jobs_data.append({
+                        "job_id": job_id, 
+                        "seq_id": job_state.seq_id,
+                        "last_run": last_run,
+                        "next_run": next_run,
+                        "status": job_state.run_state.value if job_state.run_state else "UNKNOWN",
+                        "total_execution_time": round(job_state.total_execution_time, 4),
+                        "total_runs": job_state.total_runs,
+                        "avg_execution_time": round(avg_execution_time, 4)
+                    })
+                
+                return {
+                    "success": True,
+                    "jobs": jobs_data,
+                    "total_jobs": len(job_states),
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                pass
+        
+        # Fallback: Try to get jobs from MongoDB if scheduler is not accessible
+        if _MONGODB_URI:
+            try:
+                # SSL configuration for MongoDB Atlas
+                ssl_options = {
+                    'ssl': True,
+                    'ssl_cert_reqs': 'CERT_NONE',
+                    'tlsAllowInvalidCertificates': True,
+                    'tlsAllowInvalidHostnames': True,
+                }
+                
+                mongo_client = BlazeMongoClient(_MONGODB_URI, ssl_options=ssl_options)
+                
+                if mongo_client.test_connection():
+                    # Get all job states from MongoDB
+                    job_states = mongo_client.fetch_all_job_states()
+                    
+                    if job_states:
+                        # Prepare job data
+                        jobs_data = []
+                        
+                        for job_state in job_states:
+                            # Format datetime values
+                            last_run = job_state.last_run.isoformat() if job_state.last_run else None
+                            next_run = job_state.next_run.isoformat() if job_state.next_run else None
+                            
+                            # Calculate average execution time
+                            avg_execution_time = (job_state.total_execution_time / job_state.total_runs) if job_state.total_runs > 0 else 0.0
+                            
+                            jobs_data.append({
+                                "job_id": job_state.job_id,  # Use the actual job_id from MongoDB
+                                "seq_id": job_state.seq_id,
+                                "last_run": last_run,
+                                "next_run": next_run,
+                                "status": job_state.run_state.value if job_state.run_state else "UNKNOWN",
+                                "total_execution_time": round(job_state.total_execution_time, 4),
+                                "total_runs": job_state.total_runs,
+                                "avg_execution_time": round(avg_execution_time, 4)
+                            })
+                        
+                        mongo_client.close()
+                        
+                        return {
+                            "success": True,
+                            "jobs": jobs_data,
+                            "total_jobs": len(job_states),
+                            "timestamp": datetime.now().isoformat(),
+                            "source": "mongodb_fallback"
+                        }
+                    
+                    mongo_client.close()
+                else:
+                    mongo_client.close()
+            except Exception as mongo_e:
+                pass
+        
+        # Second fallback: Try to read from local state files
+        try:
+            
+            # Try to read from the log directory where job states are actually stored
+            log_dir = "log"  # Job states are stored in the log/ directory
+            if os.path.exists(log_dir):
+                # Look for job state directories (they're named with full job IDs)
+                job_dirs = [d for d in os.listdir(log_dir) if os.path.isdir(os.path.join(log_dir, d)) and len(d) > 20]
+                
+                if job_dirs:
+                    # Prepare job data
+                    jobs_data = []
+                    
+                    for job_dir in job_dirs:
+                        state_file = os.path.join(log_dir, job_dir, "state.json")
+                        if os.path.exists(state_file):
+                            try:
+                                with open(state_file, "r") as f:
+                                    job_state_data = json.load(f)
+                                
+                                # Extract job information
+                                job_id = job_dir  # The directory name is the job_id
+                                seq_id = job_state_data.get("seq_id", "unknown")
+                                last_run = job_state_data.get("last_run")
+                                next_run = job_state_data.get("next_run")
+                                run_state = job_state_data.get("run_state", "UNKNOWN")
+                                total_execution_time = job_state_data.get("total_execution_time", 0.0)
+                                total_runs = int(job_state_data.get("total_runs", 0))
+                                
+                                # Calculate average execution time
+                                avg_execution_time = (total_execution_time / total_runs) if total_runs > 0 else 0.0
+                                
+                                jobs_data.append({
+                                    "job_id": job_id,  # Use full job_id, not truncated display format
+                                    "seq_id": seq_id,
+                                    "last_run": last_run,
+                                    "next_run": next_run,
+                                    "status": run_state,
+                                    "total_execution_time": round(total_execution_time, 4),
+                                    "total_runs": total_runs,
+                                    "avg_execution_time": round(avg_execution_time, 4)
+                                })
+                                
+                            except Exception as e:
+                                pass
+                    
+                    if jobs_data:
+                        return {
+                            "success": True,
+                            "jobs": jobs_data,
+                            "total_jobs": len(jobs_data),
+                            "timestamp": datetime.now().isoformat(),
+                            "source": "local_state_files"
+                        }
+                
+        except Exception as local_e:
+            pass
+        
+        # If no jobs found from any source
+        return {
+            "success": True,
+            "message": "No jobs found in Blaze scheduler or MongoDB.",
+            "jobs": [],
+            "total_jobs": 0,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error retrieving job status from Blaze scheduler: {str(e)}",
             "jobs": [],
             "total_jobs": 0
         }

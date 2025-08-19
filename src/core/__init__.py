@@ -20,7 +20,6 @@ from ._types import (
     JobFile,
     JobExecutuionData,
     JobState,
-    SequenceData,
     BlazeLock
 )
 
@@ -39,5 +38,8 @@ __all__ = [
     'SequenceResult',
     'SequenceExecutionData',
     'SubmitSequenceData',
+    'JobFile',
+    'JobExecutuionData',
+    'JobState',
     'BlazeLock'
 ]
