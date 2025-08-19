@@ -109,6 +109,9 @@ class BlazeSequence:
             self.logger.info(f"Run {seq_id}/{job_id} - success with context: {execution_context}")
             return execution_context
 
+        # Give the function a proper name for serialization
+        sequencialise.__name__ = f"sequencialise_{seq_id}"
+
         seq_data = SeqData(
             seq_id=seq_id,
             description=description,

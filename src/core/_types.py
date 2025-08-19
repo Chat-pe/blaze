@@ -90,20 +90,13 @@ class JobState(JobExecutuionData):
     error_logs: Optional[List[str]] = None
     total_execution_time: Optional[float] = 0.0
     total_runs: Optional[int] = 0
+    retries: int = 0
+    retry_delay: int = 0
+    seq_run_timeout: int = 300
 
     @field_serializer('last_run', 'next_run')
     def serialize_dates(self, value: Optional[datetime]) -> Optional[str]:
         return value.isoformat() if value else None
-
-
-class SequenceData(BaseModel):
-
-    seq_data: JobExecutuionData
-    next_run: Optional[datetime] = Field(default_factory=datetime.now)
-    last_run: Optional[datetime] = None
-    latest_result: Optional[Dict[str, Any]] = None
-    error_logs: Optional[List[str]] = None
-    total_execution_time: Optional[float] = 0.0
 
 
 class BlazeLock(BaseModel):
